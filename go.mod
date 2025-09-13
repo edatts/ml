@@ -7,6 +7,7 @@ require (
 	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/exp v0.0.0-20250819193227-8b4c13bb791b
+	gonum.org/v1/gonum v0.16.0
 )
 
 require (
