@@ -52,7 +52,9 @@ func TestMultiply(t *testing.T) {
 
 		for _, fn := range []func([][]float64, [][]float64) ([][]float64, error){
 			mat.Mul,
-			mat.MulParallel,
+			mat.MulUnroll,
+			mat.MulConcurrent,
+			mat.MulUnrollConcurrent,
 		} {
 			Y, err := fn(A, B)
 			require.NoError(t, err)
@@ -66,14 +68,44 @@ func TestMultiply(t *testing.T) {
 	})
 }
 
+func TestAddMatVecRows(t *testing.T) {
+	var (
+		A = [][]float64{
+			{1, 1, 1},
+			{1, 2, 3},
+			{3, 2, 1},
+			{1, 2, 1},
+		}
+		B = []float64{
+			1, 2, 3,
+		}
+		Y_expected = [][]float64{
+			{2, 3, 4},
+			{2, 4, 6},
+			{4, 4, 4},
+			{2, 4, 4},
+		}
+	)
+
+	Y, err := mat.AddMatVecRows(A, B)
+	require.NoError(t, err)
+
+	for i := range len(Y_expected) {
+		for j := range len(Y_expected[0]) {
+			require.Equal(t, Y_expected[i][j], Y[i][j])
+		}
+	}
+
+}
+
 func BenchmarkMultiply(b *testing.B) {
 	var (
-		A   = randMatrixFromShape([2]int{32, 64})
-		B   = randMatrixFromShape([2]int{64, 64})
+		A   = randMatrixFromShape([2]int{42, 128})
+		B   = randMatrixFromShape([2]int{128, 102})
 		A_f = flatten(A)
 		B_f = flatten(B)
-		A_g = gmat.NewDense(32, 64, A_f)
-		B_g = gmat.NewDense(64, 64, B_f)
+		A_g = gmat.NewDense(42, 128, A_f)
+		B_g = gmat.NewDense(128, 102, B_f)
 	)
 
 	b.Run("sequential", func(b *testing.B) {
@@ -83,16 +115,30 @@ func BenchmarkMultiply(b *testing.B) {
 		}
 	})
 
-	b.Run("parallel", func(b *testing.B) {
+	b.Run("unrolled", func(b *testing.B) {
 		for b.Loop() {
-			_, err := mat.MulParallel(A, B)
+			_, err := mat.MulUnroll(A, B)
+			require.NoError(b, err)
+		}
+	})
+
+	b.Run("concurrent", func(b *testing.B) {
+		for b.Loop() {
+			_, err := mat.MulConcurrent(A, B)
+			require.NoError(b, err)
+		}
+	})
+
+	b.Run("unrolled concurrent", func(b *testing.B) {
+		for b.Loop() {
+			_, err := mat.MulUnrollConcurrent(A, B)
 			require.NoError(b, err)
 		}
 	})
 
 	b.Run("gonum", func(b *testing.B) {
 		for b.Loop() {
-			gmat.NewDense(32, 64, nil).Mul(A_g, B_g)
+			gmat.NewDense(42, 102, nil).Mul(A_g, B_g)
 		}
 	})
 }
