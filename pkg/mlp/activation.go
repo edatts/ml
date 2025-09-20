@@ -3,49 +3,65 @@ package mlp
 import (
 	"math"
 
-	"golang.org/x/exp/slices"
+	"slices"
 )
 
 type ActivationFunc interface {
-	Forward(float64) float64
-	Backward(float64) float64
+	Forward([]float64) []float64
+	Backward([]float64) []float64
 }
 
 type NoOp struct{}
 
-func (n NoOp) Forward(in float64) float64 {
+func (n NoOp) Forward(in []float64) []float64 {
 	return in
 }
 
-func (n NoOp) Backward(_ float64) float64 {
-	return 1
+func (n NoOp) Backward(in []float64) []float64 {
+	return slices.Repeat([]float64{1}, len(in))
 }
 
 // y = 1/(1+e^-x)
 type Sigmoid struct{}
 
-func (s Sigmoid) Forward(in float64) float64 {
-	return 1 / (1 + math.Exp(-in))
+func (s Sigmoid) Forward(in []float64) []float64 {
+	var out = make([]float64, len(in))
+	for i, val := range in {
+		out[i] = 1 / (1 + math.Exp(-val))
+	}
+
+	return out
 }
 
-func (s Sigmoid) Backward(in float64) float64 {
-	return in * (1 - in)
+func (s Sigmoid) Backward(in []float64) []float64 {
+	var out = make([]float64, len(in))
+	for i, val := range in {
+		out[i] = val * (1 - val)
+	}
+
+	return out
 }
 
 type ReLU struct{}
 
-func (r ReLU) Forward(in float64) float64 {
-	if in > 0 {
-		return in
+func (r ReLU) Forward(in []float64) []float64 {
+	var out = make([]float64, len(in))
+	for i, val := range in {
+		if val > 0 {
+			out[i] = val
+		}
 	}
-	return 0
+	return out
 }
 
-func (r ReLU) Backward(in float64) float64 {
-	if in > 0 {
-		return 1
+func (r ReLU) Backward(in []float64) []float64 {
+	var out = make([]float64, len(in))
+	for i, val := range in {
+		if val > 0 {
+			out[i] = 1
+		}
 	}
-	return 0
+	return out
 }
 
 func LeakyReLU(in float64) float64 {
@@ -80,4 +96,10 @@ func (s SoftMax) Forward(in []float64) []float64 {
 	}
 
 	return out
+}
+
+// This simply returns slice of 1s because we have already incorporated
+// the derivative of softmax when we set dCdA in the Classify receiver.
+func (s SoftMax) Backward(in []float64) []float64 {
+	return slices.Repeat([]float64{1}, len(in))
 }
