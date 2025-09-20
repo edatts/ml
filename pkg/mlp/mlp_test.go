@@ -1,22 +1,23 @@
 package mlp_test
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"encoding/csv"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"math/rand"
 	"net/http"
 	"os"
-	"os/signal"
-	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/edatts/ml/pkg/idx"
 	"github.com/edatts/ml/pkg/mlp"
-	"github.com/go-echarts/go-echarts/v2/charts"
 	"github.com/go-echarts/go-echarts/v2/components"
-	"github.com/go-echarts/go-echarts/v2/opts"
 	"github.com/stretchr/testify/require"
 )
 
@@ -43,13 +44,13 @@ func TestActivation(t *testing.T) {
 	})
 
 	t.Run("relu", func(t *testing.T) {
-		require.Equal(t, []float64{4.8, 0}, []float64{mlp.ReLU{}.Forward(4.8), mlp.ReLU{}.Forward(-1.21)})
+		require.Equal(t, [][]float64{{4.8}, {0}}, [][]float64{mlp.ReLU{}.Forward([]float64{4.8}), mlp.ReLU{}.Forward([]float64{-1.21})})
 	})
 }
 
 func TestMLP(t *testing.T) {
-	ctx, cancel := signal.NotifyContext(t.Context(), os.Interrupt, os.Kill)
-	defer cancel()
+	// ctx, cancel := signal.NotifyContext(t.Context(), os.Interrupt, os.Kill)
+	// defer cancel()
 
 	go func() {
 		svr := &http.Server{
@@ -186,135 +187,275 @@ func TestMLP(t *testing.T) {
 
 	// })
 
-	t.Run("sine wave", func(t *testing.T) {
-		var (
-			numDatapoints         = 1000
-			numIterations         = 25000
-			batchSize             = 4
-			learningRate  float64 = 0.025
-			X, Y                  = make([][]float64, numDatapoints), make([][]float64, numDatapoints)
-			trainRatio    float64 = 0.85
-			sumLoss       float64 = 0
-			sumMSE        float64 = 0
-		)
+	// t.Run("sine wave", func(t *testing.T) {
+	// 	var (
+	// 		numDatapoints         = 1000
+	// 		numIterations         = 10000
+	// 		batchSize             = 64
+	// 		learningRate  float64 = 0.015
+	// 		X, Y                  = make([][]float64, numDatapoints), make([][]float64, numDatapoints)
+	// 		trainRatio    float64 = 0.85
+	// 		sumLoss       float64 = 0
+	// 		sumMSE        float64 = 0
+	// 	)
 
-		for i := range numDatapoints {
-			x := rand.Float64() * 3.14159 * 2
-			y := math.Sin(x)
-			X[i], Y[i] = []float64{x}, []float64{y}
-		}
+	// 	for i := range numDatapoints {
+	// 		x := rand.Float64() * 3.14159 * 2
+	// 		y := math.Sin(x)
+	// 		X[i], Y[i] = []float64{x}, []float64{y}
+	// 	}
 
-		X_train, X_test, Y_train, Y_test := trainTestSplit(X, Y, trainRatio)
+	// 	X_train, X_test, Y_train, Y_test := trainTestSplit(X, Y, trainRatio)
 
-		// sinePlot := charts.NewScatter()
-		// sinePlot.SetGlobalOptions(
-		// 	charts.WithTitleOpts(opts.Title{Title: "Sine actual"}),
-		// 	charts.WithGridOpts(opts.Grid{
-		// 		Show: opts.Bool(true),
-		// 	}),
-		// )
+	// 	// sinePlot := charts.NewScatter()
+	// 	// sinePlot.SetGlobalOptions(
+	// 	// 	charts.WithTitleOpts(opts.Title{Title: "Sine actual"}),
+	// 	// 	charts.WithGridOpts(opts.Grid{
+	// 	// 		Show: opts.Bool(true),
+	// 	// 	}),
+	// 	// )
 
-		// trainData := []opts.ScatterData{}
-		// for i, x := range X_train {
-		// 	trainData = append(trainData, opts.ScatterData{
-		// 		Value:      []float64{x[0], Y_train[i][0]},
-		// 		SymbolSize: 7,
-		// 	})
-		// }
+	// 	// trainData := []opts.ScatterData{}
+	// 	// for i, x := range X_train {
+	// 	// 	trainData = append(trainData, opts.ScatterData{
+	// 	// 		Value:      []float64{x[0], Y_train[i][0]},
+	// 	// 		SymbolSize: 7,
+	// 	// 	})
+	// 	// }
 
-		// sinePlot.AddSeries("Predicted", trainData)
+	// 	// sinePlot.AddSeries("Predicted", trainData)
 
-		// mu.Lock()
-		// allCarts = append(allCarts, sinePlot)
-		// mu.Unlock()
+	// 	// mu.Lock()
+	// 	// allCarts = append(allCarts, sinePlot)
+	// 	// mu.Unlock()
 
-		// slog.Info("ready to render page.. ")
+	// 	// slog.Info("ready to render page.. ")
 
-		model, err := mlp.New(1, 1, 2)
-		require.NoError(t, err)
+	// 	model, err := mlp.New(1, 1, 2)
+	// 	require.NoError(t, err)
 
-		for i := range numIterations {
-			var batchInput = make([][]float64, batchSize)
-			var batchTarget = make([][]float64, batchSize)
-			for j := range batchSize {
-				batchInput[j] = X_train[(j+(i*batchSize))%len(X_train)]
-				batchTarget[j] = Y_train[(j+(i*batchSize))%len(Y_train)]
-			}
+	// 	for i := range numIterations {
+	// 		var batchInput = make([][]float64, batchSize)
+	// 		var batchTarget = make([][]float64, batchSize)
+	// 		for j := range batchSize {
+	// 			batchInput[j] = X_train[(j+(i*batchSize))%len(X_train)]
+	// 			batchTarget[j] = Y_train[(j+(i*batchSize))%len(Y_train)]
+	// 		}
 
-			outputs, mse, loss, err := model.Regress(batchInput, batchTarget)
-			require.NoError(t, err)
-			sumLoss += loss
-			sumMSE += mse
+	// 		outputs, mse, loss, err := model.Regress(batchInput, batchTarget)
+	// 		require.NoError(t, err)
+	// 		sumLoss += loss
+	// 		sumMSE += mse
 
-			if (i+1)%1000 == 0 {
-				slog.Info("training info", "iteration", i+1, "lr", learningRate, "avgLoss", sumLoss/float64(1000), "avgMSE", sumMSE/float64(1000), "pred_0", outputs[0], "target_0", batchTarget[0])
-				sumLoss, sumMSE = 0, 0
-				learningRate *= 0.98
-			}
+	// 		if (i+1)%500 == 0 {
+	// 			slog.Info("training info", "iteration", i+1, "lr", learningRate, "avgLoss", sumLoss/float64(1000), "avgMSE", sumMSE/float64(1000), "pred_0", outputs[0], "target_0", batchTarget[0])
+	// 			sumLoss, sumMSE = 0, 0
+	// 			learningRate *= 0.98
+	// 			require.NoError(t, model.Backward(learningRate))
+	// 			// model.LogGrads()
+	// 			// model.LogLossDeriv()
+	// 			// model.LogWeights()
+	// 			// model.LogBiases()
+	// 			continue
+	// 		}
 
-			require.NoError(t, model.Backward(learningRate))
-		}
+	// 		require.NoError(t, model.Backward(learningRate))
+	// 	}
 
-		outputs, mse, loss, err := model.Regress(X_test, Y_test)
-		require.NoError(t, err)
+	// 	outputs, mse, loss, err := model.Regress(X_test, Y_test)
+	// 	require.NoError(t, err)
 
-		slog.Info("loss", "loss", loss)
-		slog.Info("Mean Squared Error", "MSE", mse)
+	// 	slog.Info("loss", "loss", loss)
+	// 	slog.Info("Mean Squared Error", "MSE", mse)
 
-		var numCloseEnough int
-		for i, target := range Y_test {
-			//  require.True(t, withinExpectedRange(outputs[i][0], target[0], 0.05), "actual not within range, actual=%f, expected=%f, tolerancePercentage=%d", outputs[i][0], target[0], 5)
-			if withinExpectedRange(outputs[i][0], target[0], 0.01) {
-				numCloseEnough++
-			}
-		}
+	// 	var numCloseEnough int
+	// 	for i, target := range Y_test {
+	// 		//  require.True(t, withinExpectedRange(outputs[i][0], target[0], 0.05), "actual not within range, actual=%f, expected=%f, tolerancePercentage=%d", outputs[i][0], target[0], 5)
+	// 		if withinExpectedRange(outputs[i][0], target[0], 0.01) {
+	// 			numCloseEnough++
+	// 		}
+	// 	}
 
-		slog.Info("len(Y_test)", "len", len(Y_test))
-		slog.Info("numCloseEnough", "num", numCloseEnough)
-		slog.Info("percentage of close enough answers", "percentage", (float64(numCloseEnough)/float64(len(Y_test)))*100)
+	// 	slog.Info("len(Y_test)", "len", len(Y_test))
+	// 	slog.Info("numCloseEnough", "num", numCloseEnough)
+	// 	slog.Info("percentage of close enough answers", "percentage", (float64(numCloseEnough)/float64(len(Y_test)))*100)
 
-		scatter := charts.NewScatter()
-		scatter.SetGlobalOptions(
-			charts.WithTitleOpts(opts.Title{Title: "Sine predictions"}),
-			charts.WithGridOpts(opts.Grid{
-				Show: opts.Bool(true),
-			}),
-		)
+	// 	scatter := charts.NewScatter()
+	// 	scatter.SetGlobalOptions(
+	// 		charts.WithTitleOpts(opts.Title{Title: "Sine predictions"}),
+	// 		charts.WithGridOpts(opts.Grid{
+	// 			Show: opts.Bool(true),
+	// 		}),
+	// 	)
 
-		data := []opts.ScatterData{}
-		for i, x := range X_test {
-			data = append(data, opts.ScatterData{
-				Value:      []float64{x[0], outputs[i][0]},
-				SymbolSize: 7,
-			})
-		}
+	// 	data := []opts.ScatterData{}
+	// 	for i, x := range X_test {
+	// 		data = append(data, opts.ScatterData{
+	// 			Value:      []float64{x[0], outputs[i][0]},
+	// 			SymbolSize: 7,
+	// 		})
+	// 	}
 
-		scatter.AddSeries("Predicted", data)
+	// 	scatter.AddSeries("Predicted", data)
 
-		mu.Lock()
-		allCarts = append(allCarts, scatter)
-		mu.Unlock()
+	// 	mu.Lock()
+	// 	allCarts = append(allCarts, scatter)
+	// 	mu.Unlock()
 
-	})
+	// })
 
 	t.Run("mnist handwritten digits", func(t *testing.T) {
+		slog.Info("preparing mnist data")
+
+		train, Y_train, test, Y_test := loadMNISTData(t)
+
+		slog.Info("loaded mnist data")
+
+		// This func scales the inputs data between 0 and 1 and
+		// one-hot encodes the targets.
+		X_train, X_test := formatMNISTData(t, train, test, Y_train, Y_test)
+
+		slog.Info("finished formatting data")
+
+		model, err := mlp.New(784, 10, 3, mlp.WithClassifcation())
+		require.NoError(t, err)
+
 		var (
-			X_train = make([][]float64, 60000)
-			Y_train = make([][]int, 60000)
-			X_test  = make([][]float64, 10000)
-			Y_test  = make([][]int, 10000)
+			numEpochs    = 3
+			batchSize    = 64
+			learningRate = 0.0575
 		)
 
-		train_samples, train_labels, test_samples, test_labels := loadMNISTData(t)
-		formatMNISTSamples(t, train_samples, test_samples, X_train, X_test)
-		formatMNISTLabels(t, train_labels, test_labels, Y_train, Y_test)
+		slog.Info("starting model training...")
+		for epoch := 1; epoch <= numEpochs; epoch++ {
+			var accSum, lossSum float64
+			var numBatches int
+			for _, batch := range selectBatches(batchSize, X_train, Y_train, 1) {
+				_, acc, loss, err := model.Classify(batch.Inputs, batch.Targets)
+				require.NoError(t, err)
+				accSum += acc
+				lossSum += loss
+				numBatches++
+
+				if numBatches%25 == 0 {
+					slog.Info("training info", "epoch", epoch, "lr", learningRate, "loss", lossSum/float64(25), "accuracy", accSum/float64(25))
+					accSum, lossSum = 0, 0
+					learningRate *= 0.985
+				}
+
+				require.NoError(t, model.Backward(learningRate))
+			}
+		}
+
+		_, acc, loss, err := model.Classify(X_test, Y_test)
+		require.NoError(t, err)
+
+		slog.Info("testing info", "loss", loss, "accuracy", acc)
 
 	})
 
-	<-ctx.Done()
+	// <-ctx.Done()
 }
 
-func loadMNISTData(t *testing.T) ([][]string, [][]string, [][]string, [][]string) {
+type Batch[XT, YT any] struct {
+	Inputs  []XT
+	Targets []YT
+}
+
+func NewBatch[XT, YT any](size int) *Batch[XT, YT] {
+	return &Batch[XT, YT]{
+		Inputs:  make([]XT, size),
+		Targets: make([]YT, size),
+	}
+}
+
+// Here we're just going to use repeated sampling of random subsets.
+func selectBatches[XT, YT any](batchSize int, X []XT, Y []YT, subsetRatio float64) []*Batch[XT, YT] {
+	if len(X) != len(Y) {
+		panic(fmt.Sprintf("selecting batches: X and Y are different lengths len(X)=%d, len(Y)=%d", len(X), len(Y)))
+	}
+
+	if subsetRatio < 0.01 || subsetRatio > 1 {
+		panic("batch sampling subset ratio must be between 0.01 and 1 inclusive")
+	}
+
+	shuffle(3, X, Y)
+
+	var (
+		numSamples     = int(float64(len(X)) * subsetRatio)
+		out            = make([]*Batch[XT, YT], int(math.Ceil(float64(numSamples)/float64(batchSize))))
+		batchNum   int = -1
+	)
+	for i := 0; i < numSamples; i++ {
+		if i%batchSize == 0 {
+			batchNum++
+			out[batchNum] = NewBatch[XT, YT](min(batchSize, numSamples-i))
+		}
+		out[batchNum].Inputs[i%batchSize] = X[i]
+		out[batchNum].Targets[i%batchSize] = Y[i]
+	}
+
+	return out
+}
+
+func TestSelectBatches(t *testing.T) {
+	var (
+		batchSize = 5
+		X         = []int{1, 2, 3, 4, 5, 6, 7, 8}
+		Y         = []int{2, 4, 6, 8, 10, 12, 14, 16}
+	)
+
+	batches := selectBatches(batchSize, X, Y, 1)
+	require.Len(t, batches, 2)
+	require.Len(t, batches[0].Inputs, 5)
+	require.Len(t, batches[0].Targets, 5)
+	require.Len(t, batches[1].Inputs, 3)
+	require.Len(t, batches[1].Targets, 3)
+}
+
+func loadMNISTData(t *testing.T) ([][]int, [][]int, [][]int, [][]int) {
+	var (
+		tarFile = "test/datasets/mnist/mnist.tar.gz"
+		out     = map[string]idx.Data{}
+	)
+
+	f, err := os.Open(tarFile)
+	require.NoError(t, err)
+	defer f.Close()
+
+	gr, err := gzip.NewReader(f)
+	require.NoError(t, err)
+
+	tr := tar.NewReader(gr)
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+
+		slog.Info("reading file", "name", hdr.FileInfo().Name())
+		// slog.Info("file size", "size", hdr.FileInfo().Size())
+		slog.Info("file size", "size", hdr.Size)
+
+		// var b = []byte{0}
+		// for i := range 47040016 {
+		// 	if n, err := tr.Read(b); err != nil {
+		// 		slog.Error("failed reading", "error", err, "i", i, "n", n)
+		// 		panic(err)
+		// 	}
+		// }
+
+		name := strings.Split(hdr.Name, ".")[0]
+		out[name], err = idx.ParseIdxFile(tr)
+		require.NoError(t, err)
+	}
+
+	return out["train-images"].GetInt(), out["train-labels"].GetInt(), out["t10k-images"].GetInt(), out["t10k-labels"].GetInt()
+}
+
+func loadMNISTDataFromCsv(t *testing.T) ([][]string, [][]string, [][]string, [][]string) {
 	files := []string{
 		"test/datasets/mnist/train-images.csv",
 		"test/datasets/mnist/train-labels.csv",
@@ -326,54 +467,54 @@ func loadMNISTData(t *testing.T) ([][]string, [][]string, [][]string, [][]string
 	for i, file := range files {
 		f, err := os.Open(file)
 		require.NoError(t, err)
+		defer f.Close()
 
-		fileContents[i], err = csv.NewReader(f).ReadAll()
+		// Discard header
+		cr := csv.NewReader(f)
+		_, err = cr.Read()
+		require.NoError(t, err)
+
+		fileContents[i], err = cr.ReadAll()
 		require.NoError(t, err)
 	}
 
 	return fileContents[0], fileContents[1], fileContents[2], fileContents[3]
 }
 
-func formatMNISTSamples(t *testing.T, train, test [][]string, X_train, X_test [][]float64) {
-	// Parse them into ints then scale them into float64s
+func formatMNISTData(t *testing.T, train, test [][]int, Y_train, Y_test [][]int) ([][]float64, [][]float64) {
+	// Scale image data
+	var X_train = make([][]float64, len(train))
 	for i, sample := range train {
-		var row = make([]float64, 784)
-		for j, elem := range sample {
-			num, err := strconv.ParseUint(elem, 10, 8)
-			require.NoError(t, err)
-			row[j] = float64(num) / 255
+		var scaled = make([]float64, len(sample))
+		for j, num := range sample {
+			scaled[j] = float64(num) / 255
 		}
-		X_train[i] = row
+		X_train[i] = scaled
 	}
 
+	var X_test = make([][]float64, len(test))
 	for i, sample := range test {
-		var row = make([]float64, 784)
-		for j, elem := range sample {
-			num, err := strconv.ParseUint(elem, 10, 8)
-			require.NoError(t, err)
-			row[j] = float64(num) / 255
+		var scaled = make([]float64, len(sample))
+		for j, num := range sample {
+			scaled[j] = float64(num) / 255
 		}
-		X_test[i] = row
+		X_test[i] = scaled
 	}
-}
 
-func formatMNISTLabels(t *testing.T, train, test [][]string, Y_train, Y_test [][]int) {
-	// Parse them into ints then 1 hot encode them
-	for i, sample := range train {
+	// Convert labels to 1 hot encodings
+	for i, sample := range Y_train {
 		var row = make([]int, 10)
-		num, err := strconv.ParseUint(sample[0], 10, 8)
-		require.NoError(t, err)
-		row[num] = 1
+		row[sample[0]] = 1
 		Y_train[i] = row
 	}
 
-	for i, sample := range test {
+	for i, sample := range Y_test {
 		var row = make([]int, 10)
-		num, err := strconv.ParseUint(sample[0], 10, 8)
-		require.NoError(t, err)
-		row[num] = 1
+		row[sample[0]] = 1
 		Y_test[i] = row
 	}
+
+	return X_train, X_test
 }
 
 func linspace(start, end float64, n int) []float64 {
@@ -403,14 +544,7 @@ func trainTestSplit[XT, YT any](X []XT, Y []YT, trainRatio float64) ([]XT, []XT,
 		panic("X and Y are different lengths")
 	}
 
-	// Shuffle
-	for range 5 {
-		for i := range len(X) {
-			swapIdx := rand.Intn(len(X))
-			X[i], X[swapIdx] = X[swapIdx], X[i]
-			Y[i], Y[swapIdx] = Y[swapIdx], Y[i]
-		}
-	}
+	shuffle(5, X, Y)
 
 	var (
 		trainSize = int(float64(len(X)) * trainRatio)
@@ -435,4 +569,13 @@ func trainTestSplit[XT, YT any](X []XT, Y []YT, trainRatio float64) ([]XT, []XT,
 
 func withinExpectedRange(value, expected, absRange float64) bool {
 	return value >= expected-absRange && value <= expected+absRange
+}
+
+func shuffle[XT, YT any](numRounds int, X []XT, Y []YT) {
+	for range numRounds {
+		rand.Shuffle(len(X), func(i, j int) {
+			X[i], X[j] = X[j], X[i]
+			Y[i], Y[j] = Y[j], Y[i]
+		})
+	}
 }
