@@ -323,7 +323,7 @@ func TestMLP(t *testing.T) {
 		var (
 			numEpochs    = 3
 			batchSize    = 64
-			learningRate = 0.0575
+			learningRate = 0.06
 		)
 
 		slog.Info("starting model training...")
@@ -340,7 +340,7 @@ func TestMLP(t *testing.T) {
 				if numBatches%25 == 0 {
 					slog.Info("training info", "epoch", epoch, "lr", learningRate, "loss", lossSum/float64(25), "accuracy", accSum/float64(25))
 					accSum, lossSum = 0, 0
-					learningRate *= 0.985
+					learningRate *= 0.99
 				}
 
 				require.NoError(t, model.Backward(learningRate))

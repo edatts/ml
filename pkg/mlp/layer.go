@@ -85,7 +85,8 @@ func (l *layer) Forward() {
 	// previous layer's neuron is indexed by column.
 
 	// z = actFn(dot(A,W) + b)
-	product, err := mat.MulConcurrent(l.prev.activations, l.weights)
+	// product, err := mat.MulConcurrent(l.prev.activations, l.weights)
+	product, err := mat.MulUnrollConcurrent(l.prev.activations, l.weights)
 	if err != nil {
 		panic(fmt.Sprintf("forward: %s", err))
 	}
@@ -114,14 +115,16 @@ func (l *layer) Backward() {
 
 	// dCdW = sum(prevA * dC/dz)/batchSize
 	var err error
-	l.dCdW, err = mat.MulConcurrent(mat.Transpose(l.prev.activations), l.dCdz)
+	// l.dCdW, err = mat.MulConcurrent(mat.Transpose(l.prev.activations), l.dCdz)
+	l.dCdW, err = mat.MulUnrollConcurrent(mat.Transpose(l.prev.activations), l.dCdz)
 	if err != nil {
 		panic(fmt.Sprintf("backward: %s", err))
 	}
 	l.dCdW = mat.MulScalar(l.dCdW, float64(1)/float64(l.batchSize))
 
 	// dCdA_(L-1) = W * dCdz
-	l.prev.dCdA, err = mat.MulConcurrent(l.dCdz, mat.Transpose(l.weights))
+	// l.prev.dCdA, err = mat.MulConcurrent(l.dCdz, mat.Transpose(l.weights))
+	l.prev.dCdA, err = mat.MulUnrollConcurrent(l.dCdz, mat.Transpose(l.weights))
 	if err != nil {
 		panic(fmt.Sprintf("backward: %s", err))
 	}

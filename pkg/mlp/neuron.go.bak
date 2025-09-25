@@ -1,0 +1,162 @@
+package mlp
+
+import (
+	"math/rand"
+)
+
+type Connection struct {
+	From   *Neuron
+	To     *Neuron
+	Weight float64
+	dw     float64
+}
+
+func newConnection(from, to *Neuron) *Connection {
+	return &Connection{
+		From:   from,
+		To:     to,
+		Weight: rand.Float64()*0.1 - 0.05,
+	}
+}
+
+type Neuron struct {
+	Inputs         []*Connection
+	Bias           float64
+	ActivationFunc ActivationFunc
+	Output         float64
+
+	logits      []float64
+	activations []float64
+	dCdz        []float64
+	dCdA        []float64
+
+	dB     float64
+	lambda float64
+}
+
+// Assume densely connected with ReLU activation.
+func newNeuron(prev *Layer, lType LayerType, lambda float64) *Neuron {
+	if prev == nil {
+		return &Neuron{
+			ActivationFunc: getActivationFunc(lType),
+			lambda:         lambda,
+			// Bias:           rand.Float64()*0.02 - 0.01,
+		}
+	}
+
+	var out = &Neuron{
+		Inputs:         make([]*Connection, len(prev.Neurons)),
+		Bias:           rand.Float64()*0.1 - 0.05,
+		ActivationFunc: getActivationFunc(lType),
+		lambda:         lambda,
+	}
+
+	for i, neuron := range prev.Neurons {
+		out.Inputs[i] = newConnection(neuron, out)
+	}
+
+	return out
+}
+
+// Assume densely connected with ReLU.
+func newNeurons(n int16, prev *Layer, lType LayerType, lambda float64) []*Neuron {
+	var out = make([]*Neuron, n)
+	for i := range n {
+		out[i] = newNeuron(prev, lType, lambda)
+	}
+	return out
+}
+
+func (n *Neuron) Forward(newBatch bool, batchLen int) {
+	if newBatch {
+		n.logits = []float64{}
+		n.activations = []float64{}
+		n.dCdz = make([]float64, batchLen)
+		n.dCdA = make([]float64, batchLen)
+	}
+	n.Output = 0
+	n.Output += n.Bias
+	for _, conn := range n.Inputs {
+		n.Output += conn.From.Output * conn.Weight
+	}
+	n.logits = append(n.logits, n.Output)
+	// n.Output = n.ActivationFunc.Forward(n.Output)
+	n.activations = append(n.activations, n.Output)
+}
+
+func (n *Neuron) Backward() {
+	//
+	// dz/dW = prevA
+	//
+	// dA/dz = derivActiv(z)
+	//
+	// dC/dA = 2(y_bar - y) for MSE
+	//
+	// dz/dprevA = W
+	//
+	// Weight
+	// dC/dW = dz/dW * dA/dz * dC/dA = prevA * derivActiv(z) * 2(y_bar - y)
+	//
+	// Bias
+	// dC/dB = dz/dB * dA/dz * dC/dA = 1 * derivActiv(z) * 2(y_bar - y)
+	//
+	// Prev A
+	// dC/dprevA = dz/dprevA * dA/dz * dC/dA
+	// 			 = W * derivActiv(z) * 2(y_bar - y)
+	//
+	// Prev weight
+	// dC/dprevW = dprevz/dprevW * dprevA/dprevz 	 * dC/dprevA
+	//			 = dprevz/dprevW * dprevA/dprevz 	 * dz/dprevA * dA/dz * dC/dA
+	// 			 = prevprevA 	 * derivActiv(prevz) * W * derivActiv(z) * 2(y_bar - y)
+	//
+	// Prev Bias
+	// dC/dprevB = dprevZ/dprevB * dprevA/dprevz 	 * dz/dprevA * dA/dz 		 * dC/dA
+	// 			 = 1 			 * derivActiv(prevz) * W 		 * derivActiv(z) * 2(y_bar - y)
+	//
+	// Prev prev A
+	// dC/dprevprevA = dprevz/dprevprevA * dprevA/dprevz  	  * dC/dprevA
+	//				 = prevW			 * derivActive(prevz) * W * derivActiv(z) * 2(y_bar - y)
+
+	// There are three main derivatves we need here, all three are the derivative of
+	// the loss, but with respect to different components, the weights, the bias, and
+	// the previous activations. The derivative of the previous activation needs to be
+	// a summation of all of the downstream partial derivatives with respect to the
+	// downstream activations. So for each neuron we iterate over in a layer we need
+	// to add it's contribution to that derivative to every upstream neuron.
+
+	// dCdz = derivActiv(z) * dC/dA
+	var dCdzSum float64
+	for i, logit := range n.logits {
+		n.dCdz[i] = n.ActivationFunc.Backward(logit) * n.dCdA[i]
+		dCdzSum += n.dCdz[i]
+		n.dCdA[i] = 0
+	}
+
+	// slog.Info("dCdz", "val", n.dCdz)
+	// slog.Info("dCdzSum", "val", dCdzSum)
+
+	// dB = sum(1 * dC/dz)/batchSize
+	n.dB = dCdzSum / float64(len(n.dCdz))
+
+	// dW = sum(prevA * dC/dz)/batchSize
+	for _, conn := range n.Inputs {
+		for i, dCdz := range n.dCdz {
+			conn.dw += conn.From.activations[i] * dCdz
+			conn.From.dCdA[i] += conn.Weight * dCdz
+		}
+		conn.dw /= float64(len(n.dCdz))
+	}
+}
+
+func (n *Neuron) Update(lr float64) {
+	// slog.Info("neuron update", "oldBias", n.Bias, "newBias", n.Bias-(lr*n.dB), "db", n.dB)
+	n.Bias += -lr * n.dB
+	n.dB = 0
+
+	for _, conn := range n.Inputs {
+		// slog.Info("neuron update", "oldWeight", conn.Weight, "newWeight", conn.Weight-(lr*conn.dw), "dw", conn.Weight)
+		conn.dw += n.lambda * conn.Weight // regularize
+		conn.Weight += -lr * conn.dw
+		conn.dw = 0
+	}
+}

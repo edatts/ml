@@ -59,17 +59,9 @@ func (m *MLP) outputLayer() *layer {
 	return m.Layers[len(m.Layers)-1]
 }
 
-// func (m *MLP) inputNeurons() []*Neuron {
-// 	return m.Layers[0].Neurons
-// }
-
 func (m *MLP) inputLen() int {
 	return int(m.inputLayer().width)
 }
-
-// func (m *MLP) outputNeurons() []*Neuron {
-// 	return m.Layers[len(m.Layers)-1].Neurons
-// }
 
 func (m *MLP) outputLen() int {
 	return int(m.outputLayer().width)
