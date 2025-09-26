@@ -45,16 +45,22 @@ func (m *Matrix) Row(i int) []float32 {
 	return m.data[start : start+m.NumCols()]
 }
 
+// Mul calculates the dot product between input matrices A and B and stores
+// the result in the matrix m. It returns an error if any of the matrices
+// are not compatible shapes for the operation.
 func (m *Matrix) Mul(A, B *Matrix) error {
+	// TODO: If we want to use this in our NN implementations then we need to
+	// 		 zero the output matrix before starting to accmulate results...
 	if err := m.mulValidate(A, B); err != nil {
 		return err
 	}
 
 	var (
-		AN        = A.NumCols()
-		BN        = B.NumCols()
-		AQuotient = AN / 4
-		BQuotient = BN / 4
+		AN         = A.NumCols()
+		BN         = B.NumCols()
+		AQuotient  = AN / 4
+		BQuotient  = BN / 8
+		BRemainder = BN % 8
 	)
 
 	var wg sync.WaitGroup
@@ -65,37 +71,49 @@ func (m *Matrix) Mul(A, B *Matrix) error {
 		var outRow = m.data[i_BN : (i_BN)+BN]
 		wg.Add(1)
 		go func() {
-			// Doing the whole row in Go ASM is a bit too challenging. Insted
-			// let's use a smaller ASM func to accumulate partial results of
-			// standard dimensions and then sum them in this Go function.
-
-			// We need to chunk our data to pass to the ASM func, we will use
-			// 4 x 4 chunks and accumulate the values into a 1 X 4 slice. To
-			// do this we will need two quotients and two remainders. One set
-			// for the number of columns of the input row and one set for the
-			// number of columns in the output row.
-
+			// Here we chunk our data before passing it into to the ASM func, we
+			// use a 1 x 4 slice from a row of matrix A and a 4 x 8 chunk from 4
+			// rows of matrix B. We accumulate the results into a 1 x 4 slice of
+			// the corresponding row of the output matrix. We use the quotients
+			// of our input and output row lengths divided by their coresponding
+			// chunk dimensions to create the chunking loops. This way we don't
+			// have any out of bounds array accesses. Any remaining elements are
+			// handled in separate loops after the chunking loops.
 			for j := 0; j < AQuotient; j++ {
 				var A1 = row[(j * 4) : (j*4)+4]
-				for k := 0; k < BQuotient; k++ {
+				for k := 0; k < BQuotient && BN >= 8; k++ {
 					// slog.Info("indices", "j", j*4, "k", k*4)
-					kIdx := k * 4
+					kIdx := k * 8
 					chunkIdx := kIdx + ((j * 4) * BN)
+					B1 := B.data[chunkIdx+(0*BN) : chunkIdx+(0*BN)+8]
+					B2 := B.data[chunkIdx+(1*BN) : chunkIdx+(1*BN)+8]
+					B3 := B.data[chunkIdx+(2*BN) : chunkIdx+(2*BN)+8]
+					B4 := B.data[chunkIdx+(3*BN) : chunkIdx+(3*BN)+8]
+
+					// This is our GoASM func that handles the muliplicaitons and
+					// additions for each chunk, the results are accumulated in the
+					// output slice in an additive fashion.
+					DotMatChunk8(A1, B1, B2, B3, B4, outRow[kIdx:kIdx+8])
+
+				}
+
+				// If remainder is >= 4 then process a 4 x 4 chunk here then add
+				// 4 to the start index of the remainder loop.
+				var extraIndex int
+				if BRemainder >= 4 {
+					k := BQuotient * 8
+					chunkIdx := k + ((j * 4) * BN)
 					B1 := B.data[chunkIdx+(0*BN) : chunkIdx+(0*BN)+4]
 					B2 := B.data[chunkIdx+(1*BN) : chunkIdx+(1*BN)+4]
 					B3 := B.data[chunkIdx+(2*BN) : chunkIdx+(2*BN)+4]
 					B4 := B.data[chunkIdx+(3*BN) : chunkIdx+(3*BN)+4]
-					// slog.Info("B", "B1", B1)
-					// slog.Info("B", "B2", B2)
-					// slog.Info("B", "B3", B3)
-					// slog.Info("B", "B4", B4)
-					// fmt.Println()
-					DotMatChunk(A1, B1, B2, B3, B4, outRow[kIdx:kIdx+4])
-					// slog.Info("out row slice", "data", outRow[k*4:(k*4)+4])
+
+					DotMatChunk4(A1, B1, B2, B3, B4, outRow[k:k+4])
+					extraIndex += 4
 				}
 
 				// Handle remainder
-				for k := BQuotient * 4; k < BN; k++ {
+				for k := BQuotient*8 + extraIndex; k < BN; k++ {
 					// slog.Info("indices", "j", j*4, "k", k)
 					chunkIdx := k + ((j * 4) * BN)
 					// slog.Info("indices", "cIdx", chunkIdx)
@@ -103,44 +121,16 @@ func (m *Matrix) Mul(A, B *Matrix) error {
 					R2 := A1[1] * B.data[chunkIdx+(1*BN)]
 					R3 := A1[2] * B.data[chunkIdx+(2*BN)]
 					R4 := A1[3] * B.data[chunkIdx+(3*BN)]
-					// slog.Info("B", "B1", B.data[chunkIdx+(0*BN)])
-					// slog.Info("B", "B2", B.data[chunkIdx+(1*BN)])
-					// slog.Info("B", "B3", B.data[chunkIdx+(2*BN)])
-					// slog.Info("B", "B4", B.data[chunkIdx+(3*BN)])
 					outRow[k] += R1 + R2 + R3 + R4
 				}
 			}
 
 			// Handle remainder
 			for j := AQuotient * 4; j < AN; j++ {
-				// var bRow []float32
 				for k := range BN {
 					outRow[k] += row[j] * B.data[(j*BN)+k]
-					// bRow = append(bRow, B.data[(j*BN)+k])
 				}
-				// slog.Info("BRow", "BRow", bRow)
 			}
-
-			// slog.Info("outrow", "data", outRow)
-
-			// DotVecMat(row, B.data, outRow)
-
-			// math.Float32bits(outRow[0])
-			// math.Float32bits(outRow[1])
-
-			// quotient := make([]byte, 8)
-			// binary.NativeEndian.PutUint32(quotient[:4], math.Float32bits(outRow[0]))
-			// binary.NativeEndian.PutUint32(quotient[4:8], math.Float32bits(outRow[1]))
-
-			// remainder := make([]byte, 8)
-			// binary.NativeEndian.PutUint32(remainder[:4], math.Float32bits(outRow[2]))
-			// binary.NativeEndian.PutUint32(remainder[4:8], math.Float32bits(outRow[3]))
-
-			// q := int64(binary.NativeEndian.Uint64(quotient))
-			// r := int64(binary.NativeEndian.Uint64(remainder))
-
-			// slog.Info("vals", "quotient", q, "remainder", r)
-			// panic("lol")
 
 			wg.Done()
 		}()
@@ -204,7 +194,9 @@ func (m *Matrix) mulValidate(A, B *Matrix) error {
 	return nil
 }
 
-func DotMatChunk(A1, B1, B2, B3, B4, out []float32)
+func DotMatChunk8(A1, B1, B2, B3, B4, out []float32)
+
+func DotMatChunk4(A1, B1, B2, B3, B4, out []float32)
 
 func DotVecMat(row, B, out []float32)
 
@@ -311,12 +303,6 @@ func MulUnrollConcurrent(A [][]float64, B [][]float64) ([][]float64, error) {
 		go func() {
 			outRow := make([]float64, len(B[0]))
 			for j := range len(B[0]) {
-				// runtime.LockOSThread()
-				// We actually see worse performance here unless we lock this
-				// goroutine to the OS thread for the duration of this loop. My
-				// assumption is that the goroutine scheduling interferes with the
-				// CPU pipelining and causes issues with cache locality since
-				// goroutines will end up executing across multiple OS threads.
 				for k := 0; k < quotient*4; k += 4 {
 					sum1 := A[i][k] * B[k][j]
 					sum2 := A[i][k+1] * B[k+1][j]
@@ -324,7 +310,6 @@ func MulUnrollConcurrent(A [][]float64, B [][]float64) ([][]float64, error) {
 					sum4 := A[i][k+3] * B[k+3][j]
 					outRow[j] += sum1 + sum2 + sum3 + sum4
 				}
-				// runtime.UnlockOSThread()
 
 				// Handle any remaining elements
 				for k := quotient * 4; k < len(A[0]); k++ {
