@@ -106,34 +106,13 @@ func TestAddMatVecRows(t *testing.T) {
 
 func TestMatrixMul(t *testing.T) {
 	var (
-		// A = mat.NewFromSlices([][]float32{
-		// 	{1, 2, 3, 4, 5, 1},
-		// 	{1, 2, 3, 4, 5, 1},
-		// 	{1, 2, 3, 4, 5, 1},
-		// 	{1, 2, 3, 4, 5, 1},
-		// })
-		// B = mat.NewFromSlices([][]float32{
-		// 	{1, 1, 1, 1, 1},
-		// 	{1, 1, 1, 1, 1},
-		// 	{1, 1, 1, 1, 1},
-		// 	{1, 1, 1, 1, 1},
-		// 	{1, 1, 1, 1, 1},
-		// 	{1, 1, 1, 1, 1},
-		// })
-		// out      = mat.New(4, 5)
-		// expected = mat.NewFromSlices([][]float32{
-		// 	{16, 16, 16, 16, 16},
-		// 	{16, 16, 16, 16, 16},
-		// 	{16, 16, 16, 16, 16},
-		// 	{16, 16, 16, 16, 16},
-		// })
-		A = mat.NewFromSlices([][]float32{
+		AData = [][]float32{
 			{1, 2, 3, 4, 5, 1, 1, 1, 1},
 			{1, 2, 3, 4, 5, 1, 1, 1, 1},
 			{1, 2, 3, 4, 5, 1, 1, 1, 1},
 			{1, 2, 3, 4, 5, 1, 1, 1, 1},
-		})
-		B = mat.NewFromSlices([][]float32{
+		}
+		BData = [][]float32{
 			{1, 1, 1, 1, 1, 1, 1},
 			{1, 1, 1, 1, 1, 1, 1},
 			{1, 1, 1, 1, 1, 1, 1},
@@ -143,15 +122,25 @@ func TestMatrixMul(t *testing.T) {
 			{1, 1, 1, 1, 1, 1, 1},
 			{1, 1, 1, 1, 1, 1, 1},
 			{1, 1, 1, 1, 1, 1, 1},
-		})
-		out      = mat.New(4, 7)
-		expected = mat.NewFromSlices([][]float32{
+		}
+		expectedData = [][]float32{
 			{19, 19, 19, 19, 19, 19, 19},
 			{19, 19, 19, 19, 19, 19, 19},
 			{19, 19, 19, 19, 19, 19, 19},
 			{19, 19, 19, 19, 19, 19, 19},
-		})
+		}
 	)
+
+	A, err := mat.NewFromSlices(AData)
+	require.NoError(t, err)
+
+	B, err := mat.NewFromSlices(BData)
+	require.NoError(t, err)
+
+	expected, err := mat.NewFromSlices(expectedData)
+	require.NoError(t, err)
+
+	out := mat.New(4, 7)
 
 	require.NoError(t, out.Mul(A, B))
 	for i := range out.NumRows() {
@@ -162,6 +151,69 @@ func TestMatrixMul(t *testing.T) {
 			require.Equal(t, expected.Row(i)[j], out.Row(i)[j])
 		}
 	}
+}
+
+func TestMatrixTranspose(t *testing.T) {
+	var (
+		data1 = []float32{
+			1, 2, 3, 4, 5,
+			1, 1, 2, 3, 4,
+			1, 1, 1, 2, 3,
+			1, 1, 1, 1, 2,
+			1, 1, 1, 1, 1,
+		}
+		expected1 = []float32{
+			1, 1, 1, 1, 1,
+			2, 1, 1, 1, 1,
+			3, 2, 1, 1, 1,
+			4, 3, 2, 1, 1,
+			5, 4, 3, 2, 1,
+		}
+
+		data2 = []float32{
+			1, 2, 3, 4, 5,
+			1, 1, 2, 3, 4,
+			1, 1, 1, 2, 3,
+		}
+		expected2 = []float32{
+			1, 1, 1,
+			2, 1, 1,
+			3, 2, 1,
+			4, 3, 2,
+			5, 4, 3,
+		}
+
+		data3 = []float32{
+			1, 2, 3,
+			1, 1, 2,
+			1, 1, 1,
+			1, 1, 1,
+			1, 1, 1,
+		}
+		expected3 = []float32{
+			1, 1, 1, 1, 1,
+			2, 1, 1, 1, 1,
+			3, 2, 1, 1, 1,
+		}
+	)
+
+	for _, test := range []struct {
+		h, w     int
+		data     []float32
+		expected []float32
+	}{
+		{5, 5, data1, expected1},
+		{3, 5, data2, expected2},
+		{5, 3, data3, expected3},
+	} {
+		m, err := mat.NewFromData(test.h, test.w, test.data)
+		require.NoError(t, err)
+
+		for i, elem := range m.Traspose().Data() {
+			require.Equal(t, test.expected[i], elem)
+		}
+	}
+
 }
 
 func TestDotVec(t *testing.T) {
@@ -185,11 +237,14 @@ func BenchmarkMultiply(b *testing.B) {
 		A_F32 = toF32(A)
 		B_F32 = toF32(B)
 
-		dense     = gmat.NewDense(64, 128, nil)
-		matrixA   = mat.NewFromSlices(A_F32)
-		matrixB   = mat.NewFromSlices(B_F32)
-		outMatrix = mat.New(64, 128)
+		dense = gmat.NewDense(64, 128, nil)
 	)
+
+	matrixA, err := mat.NewFromSlices(A_F32)
+	require.NoError(b, err)
+	matrixB, err := mat.NewFromSlices(B_F32)
+	require.NoError(b, err)
+	outMatrix := mat.New(64, 128)
 
 	b.Run("sequential", func(b *testing.B) {
 		for b.Loop() {

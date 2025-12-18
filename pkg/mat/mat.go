@@ -27,22 +27,116 @@ func New(numRows, numCols int) *Matrix {
 	}
 }
 
-func NewFromSlices(orig [][]float32) *Matrix {
+func NewFromSlices(orig [][]float32) (*Matrix, error) {
+	if len(orig) == 0 {
+		return nil, fmt.Errorf("zero length slice provided")
+	}
+
+	for _, row := range orig[1:] {
+		if len(row) != len(orig[0]) {
+			return nil, fmt.Errorf("not all rows are the same length")
+		}
+	}
+
 	var data = make([]float32, len(orig)*len(orig[0]))
 	for i := range len(orig) {
 		for j := range len(orig[0]) {
 			data[i*len(orig[0])+j] = orig[i][j]
 		}
 	}
+
 	return &Matrix{
 		data:  data,
 		shape: [2]int{len(orig), len(orig[0])},
+	}, nil
+}
+
+func NewFromData(numRows, numCols int, data []float32) (*Matrix, error) {
+	if len(data) != numRows*numCols {
+		return nil, fmt.Errorf("length of data is incompatible with specified dimensions")
 	}
+
+	return &Matrix{
+		data:  data,
+		shape: [2]int{numRows, numCols},
+	}, nil
+}
+
+func (m *Matrix) Data() []float32 {
+	return m.data
 }
 
 func (m *Matrix) Row(i int) []float32 {
 	start := i * m.NumCols()
 	return m.data[start : start+m.NumCols()]
+}
+
+func (m *Matrix) Traspose() *Matrix {
+	if len(m.data) == 0 {
+		return m
+	}
+
+	var outData = make([]float32, len(m.data))
+	for i := range m.NumRows() {
+		for j := range m.NumCols() {
+			remainder := ((i * m.NumCols()) + j) % m.NumCols()
+			outData[(m.NumRows()*remainder)+i] = m.data[(i*m.NumCols())+j]
+		}
+	}
+
+	return &Matrix{
+		data:  outData,
+		shape: [2]int{m.NumCols(), m.NumRows()},
+	}
+}
+
+func (m *Matrix) AddToRows(vec []float32) error {
+	if len(vec) != m.NumCols() {
+		return fmt.Errorf("vector and matrix are incompatible shapes")
+	}
+
+	for i := range m.NumRows() {
+		for j := range m.Row(i) {
+			m.Row(i)[j] += vec[j]
+		}
+	}
+
+	return nil
+}
+
+func (m *Matrix) ApplyActivation(fn func(float32) float32) *Matrix {
+	var out = New(m.NumRows(), m.NumCols())
+	for i, datum := range m.data {
+		out.data[i] = fn(datum)
+	}
+	return out
+}
+
+func (m *Matrix) Hadamard(A, B *Matrix) error {
+	if A.shape != B.shape || m.shape != A.shape {
+		return fmt.Errorf("input matrices are incompatible shapes")
+	}
+
+	for i := range m.data {
+		m.data[i] = A.data[i] * B.data[i]
+	}
+
+	return nil
+}
+
+func (m *Matrix) AvgCols() []float32 {
+	var out = make([]float32, m.NumCols())
+	for i := range m.NumRows() {
+		for j, elem := range m.Row(i) {
+			out[j] += elem
+		}
+	}
+
+	for i := range m.NumCols() {
+		out[i] /= float32(m.NumRows())
+	}
+
+	return out
 }
 
 // Mul calculates the dot product between input matrices A and B and stores
@@ -137,40 +231,6 @@ func (m *Matrix) Mul(A, B *Matrix) error {
 	}
 
 	wg.Wait()
-
-	// quotient := A.NumCols() / 4
-
-	// var wg sync.WaitGroup
-	// for i := 0; i < len(A.data); i += A.NumCols() {
-	// 	var row = A.data[i : i+A.NumCols()]
-	// 	wg.Add(1)
-	// 	go func() {
-	// 		// Now we want to dot our row with each column to produce a new row
-	// 		for j := range B.NumCols() {
-	// 			var val float32
-	// 			for k := 0; k < quotient*4; k += 4 {
-	// 				// slog.Info("row", "row", row, "i", i, "k", k, "j", j)
-
-	// 				val += DotVec4(row, B.data, k, j, B.NumCols())
-	// 				// slog.Info("val", "val", val)
-	// 				// panic("lol")
-	// 			}
-
-	// 			// Handle any remaining elements
-	// 			for k := quotient * 4; k < A.NumCols(); k++ {
-	// 				// slog.Info("tings", "k", k, "j", j, "k*NC+j", k*B.NumCols()+j)
-	// 				val += row[k] * B.data[k*B.NumCols()+j]
-	// 			}
-
-	// 			// slog.Info("value", "index", (i/A.NumCols())+j, "i", i/A.NumCols(), "j", j, "val", val)
-	// 			m.data[((i/A.NumCols())*m.NumCols())+j] = val
-	// 		}
-
-	// 		wg.Done()
-	// 	}()
-	// }
-
-	// wg.Wait()
 	return nil
 }
 
@@ -197,10 +257,6 @@ func (m *Matrix) mulValidate(A, B *Matrix) error {
 func DotMatChunk8(A1, B1, B2, B3, B4, out []float32)
 
 func DotMatChunk4(A1, B1, B2, B3, B4, out []float32)
-
-func DotVecMat(row, B, out []float32)
-
-func DotVec4(row, B []float32, k, j, n int) float32
 
 // The matrix product is the dot product between the row vectors of A
 // and the column vectors of B, hence, the number of columns in A must

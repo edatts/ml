@@ -321,29 +321,29 @@ func TestMLP(t *testing.T) {
 		require.NoError(t, err)
 
 		var (
-			numEpochs    = 3
+			numEpochs    = 16
 			batchSize    = 64
-			learningRate = 0.06
+			learningRate = 0.05
 		)
 
 		slog.Info("starting model training...")
 		for epoch := 1; epoch <= numEpochs; epoch++ {
 			var accSum, lossSum float64
 			var numBatches int
-			for _, batch := range selectBatches(batchSize, X_train, Y_train, 1) {
+			for _, batch := range selectBatches(batchSize, X_train, Y_train, 0.20) {
 				_, acc, loss, err := model.Classify(batch.Inputs, batch.Targets)
 				require.NoError(t, err)
 				accSum += acc
 				lossSum += loss
 				numBatches++
 
-				if numBatches%25 == 0 {
-					slog.Info("training info", "epoch", epoch, "lr", learningRate, "loss", lossSum/float64(25), "accuracy", accSum/float64(25))
+				if numBatches%20 == 0 {
+					slog.Info("training info", "epoch", epoch, "lr", learningRate, "loss", lossSum/float64(20), "accuracy", accSum/float64(20))
 					accSum, lossSum = 0, 0
-					learningRate *= 0.99
 				}
 
 				require.NoError(t, model.Backward(learningRate))
+				learningRate *= 0.99925
 			}
 		}
 

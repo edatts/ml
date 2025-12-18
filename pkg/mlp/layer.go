@@ -139,11 +139,45 @@ func (l *layer) Update(lr float64) {
 	// Regularize and update
 	for i := range len(l.weights) {
 		for j := range len(l.weights[0]) {
-			l.biases[j] += -lr * l.dCdB[j]
 			l.weights[i][j] += (l.weights[i][j] * l.lambda) + (-lr * l.dCdW[i][j])
 		}
 	}
+
+	for i := range l.biases {
+		l.biases[i] += -lr * l.dCdB[i]
+	}
 }
+
+// dz/dW = prevA
+//
+// dA/dz = derivActiv(z)
+//
+// dC/dA = 2(y_bar - y) for MSE
+//
+// dz/dprevA = W
+//
+// Weight
+// dC/dW = dz/dW * dA/dz * dC/dA = prevA * derivActiv(z) * 2(y_bar - y)
+//
+// Bias
+// dC/dB = dz/dB * dA/dz * dC/dA = 1 * derivActiv(z) * 2(y_bar - y)
+//
+// Prev A
+// dC/dprevA = dz/dprevA * dA/dz * dC/dA
+// 			 = W * derivActiv(z) * 2(y_bar - y)
+//
+// Prev weight
+// dC/dprevW = dprevz/dprevW * dprevA/dprevz 	 * dC/dprevA
+//			 = dprevz/dprevW * dprevA/dprevz 	 * dz/dprevA * dA/dz * dC/dA
+// 			 = prevprevA 	 * derivActiv(prevz) * W * derivActiv(z) * 2(y_bar - y)
+//
+// Prev Bias
+// dC/dprevB = dprevZ/dprevB * dprevA/dprevz 	 * dz/dprevA * dA/dz 		 * dC/dA
+// 			 = 1 			 * derivActiv(prevz) * W 		 * derivActiv(z) * 2(y_bar - y)
+//
+// Prev prev A
+// dC/dprevprevA = dprevz/dprevprevA * dprevA/dprevz  	  * dC/dprevA
+//				 = prevW			 * derivActive(prevz) * W * derivActiv(z) * 2(y_bar - y)
 
 // type Layer struct {
 // 	prev    *Layer

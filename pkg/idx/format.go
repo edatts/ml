@@ -35,6 +35,10 @@ func readUint8Content(numRows, numCols int, r io.Reader) ([][]int, error) {
 			return nil, fmt.Errorf("failed reading sample: %w", err)
 		}
 		content[i] = formatUint8Sample(sample)
+		// for i := range len(sample) / 28 {
+		// 	slog.Info("data", "row", fmt.Sprintf("%x", sample[i*28:i*28+28]))
+		// }
+		// fmt.Println()
 	}
 	return content, nil
 }

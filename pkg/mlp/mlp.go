@@ -42,7 +42,7 @@ func New(inputSize, outputSize, numHidden int, opts ...Option) (*MLP, error) {
 	m.Layers[0] = m.newLayer(Input, int16(inputSize), nil, m.lambda)
 
 	for i := range numHidden {
-		l := m.newLayer(Hidden, 100, m.Layers[i], m.lambda)
+		l := m.newLayer(Hidden, 512, m.Layers[i], m.lambda)
 		m.Layers[i+1] = l
 	}
 
