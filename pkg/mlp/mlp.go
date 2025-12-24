@@ -4,7 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+
+	"github.com/edatts/ml/pkg/model"
 )
+
+// TODO: We need to relocate all the optimizer logic to the optimizer pkg and
+// leave only the necessary logic for Forward passes and Backpropagation.
+var _ model.Model = &MLP{}
 
 type MLP struct {
 	lambda float64 // Regularization factor
