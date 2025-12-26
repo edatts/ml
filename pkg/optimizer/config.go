@@ -1,19 +1,22 @@
 package optimizer
 
-import "github.com/edatts/ml/pkg/model"
-
 type Config struct {
-	numEpochs    int
-	batchSize    int
-	learningRate float64
-	saveWeights  bool
+	numEpochs      int
+	batchSize      int
+	learningRate   float64
+	lrDecay        float64
+	lambda         float64
+	trainLogWindow int
+	saveWeights    bool
+	classification bool
 }
 
 func NewConfig() Config {
 	return Config{
-		numEpochs:    10,
-		batchSize:    32,
-		learningRate: 0.01,
+		numEpochs:      10,
+		batchSize:      32,
+		learningRate:   0.01,
+		trainLogWindow: 20,
 	}
 }
 
@@ -35,21 +38,45 @@ func WithLearningRate(lr float64) option {
 	}
 }
 
+func WithLearningRateDecay(decay float64) option {
+	return func(o *optimizer) {
+		o.cfg.lrDecay = decay
+	}
+}
+
+func WithRegularizationFactor(lambda float64) option {
+	return func(o *optimizer) {
+		o.cfg.lambda = lambda
+	}
+}
+
+func WithLoggingInterval(numBatches int) option {
+	return func(o *optimizer) {
+		o.cfg.trainLogWindow = numBatches
+	}
+}
+
 func WithSaveWeights() option {
 	return func(o *optimizer) {
 		o.cfg.saveWeights = true
 	}
 }
 
-func WithModel(model model.Model) option {
+func WithClassification() option {
 	return func(o *optimizer) {
-		o.model = model
+		o.cfg.classification = true
 	}
 }
 
-func WithDataProvider(prov func() ([]float32, any, error)) option {
+func WithTrainDataProvider(prov func() ([][]float32, any, error)) option {
 	return func(o *optimizer) {
-		o.dataProvider = prov
+		o.trainDataProvider = prov
+	}
+}
+
+func WithTestDataProvider(prov func() ([][]float32, any, error)) option {
+	return func(o *optimizer) {
+		o.testDataProvider = prov
 	}
 }
 

@@ -7,8 +7,8 @@ type Numeric interface {
 }
 
 type Data[YT Numeric] struct {
-	X []float32
-	Y []YT
+	X [][]float32
+	Y [][]YT
 }
 
 type Batch[YT Numeric] struct {
