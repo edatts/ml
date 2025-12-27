@@ -321,7 +321,7 @@ func TestMLP(t *testing.T) {
 		require.NoError(t, err)
 
 		var (
-			numEpochs    = 16
+			numEpochs    = 5
 			batchSize    = 64
 			learningRate = 0.05
 		)

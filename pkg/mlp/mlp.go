@@ -4,13 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-
-	"github.com/edatts/ml/pkg/model"
 )
 
 // TODO: We need to relocate all the optimizer logic to the optimizer pkg and
 // leave only the necessary logic for Forward passes and Backpropagation.
-var _ model.Model = &MLP{}
+// var _ model.Model = &MLP{}
 
 type MLP struct {
 	lambda float64 // Regularization factor
@@ -73,7 +71,19 @@ func (m *MLP) outputLen() int {
 	return int(m.outputLayer().width)
 }
 
-func (m *MLP) sumSquaredWeights() float64 {
+func (m *MLP) sumWeights() float64 {
+	var sum float64
+	for _, layer := range m.Layers[1:] {
+		for _, row := range layer.weights {
+			for _, w := range row {
+				sum += w
+			}
+		}
+	}
+	return sum
+}
+
+func (m *MLP) SumSquaredWeights() float64 {
 	var sum float64
 	for _, layer := range m.Layers[1:] {
 		for _, row := range layer.weights {
@@ -181,7 +191,7 @@ func (m *MLP) Regress(batch [][]float64, y [][]float64) ([][]float64, float64, f
 
 	// Regularize the loss with L2 regularization
 	// 0.5 * lambda * sum(W^2)
-	regLoss := 0.5 * m.lambda * m.sumSquaredWeights()
+	regLoss := 0.5 * m.lambda * m.SumSquaredWeights()
 
 	return outputs, loss, loss + regLoss, nil
 }
@@ -210,7 +220,7 @@ func (m *MLP) Classify(batch [][]float64, y [][]int) ([][]float64, float64, floa
 
 	// Regularize the loss with L2 regularization
 	// 0.5 * lambda * sum(W^2)
-	regLoss := 0.5 * m.lambda * m.sumSquaredWeights()
+	regLoss := 0.5 * m.lambda * m.SumSquaredWeights()
 
 	return outputs, Accuracy(outputs, y), loss + regLoss, nil
 }

@@ -139,7 +139,7 @@ func (l *layer) Update(lr float64) {
 	// Regularize and update
 	for i := range len(l.weights) {
 		for j := range len(l.weights[0]) {
-			l.weights[i][j] += (l.weights[i][j] * l.lambda) + (-lr * l.dCdW[i][j])
+			l.weights[i][j] -= lr * (l.dCdW[i][j] + (l.lambda * l.weights[i][j]))
 		}
 	}
 
