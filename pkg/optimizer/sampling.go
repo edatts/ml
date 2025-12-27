@@ -45,7 +45,7 @@ type baseSampler[YT Numeric] struct {
 }
 
 func (s *baseSampler[YT]) Init(batchSize int, provider func() ([][]float32, any, error)) error {
-	if batchSize == 0 {
+	if batchSize <= 0 {
 		return ErrBatchSize
 	}
 	s.batchSize = batchSize
@@ -61,15 +61,11 @@ func (s *baseSampler[YT]) Init(batchSize int, provider func() ([][]float32, any,
 	var ok bool
 	s.data.Y, ok = targets.([][]YT)
 	if !ok {
-		return fmt.Errorf("dataset targets are wrong type, got %T, expected %T", targets, *new(YT))
+		return fmt.Errorf("%w, got %T, expected %T", ErrTargetsDataType, targets, *new(YT))
 	}
 
 	if len(s.data.X) != len(s.data.Y) {
-		return fmt.Errorf("samples and targets are different lengths, len(samples)=%d, len(targets)=%d", len(s.data.X), len(s.data.Y))
-	}
-
-	if len(s.data.X) < s.batchSize {
-		return fmt.Errorf("batch size to large, must be less than number of samples")
+		return fmt.Errorf("%w, len(samples)=%d, len(targets)=%d", ErrDataLengths, len(s.data.X), len(s.data.Y))
 	}
 
 	s.initialized = true
@@ -164,7 +160,7 @@ func (s *RS2Sampler[YT]) NewEpoch() int {
 	return s.epoch
 }
 
-func (s RS2Sampler[YT]) Next() bool {
+func (s *RS2Sampler[YT]) Next() bool {
 	if !s.initialized {
 		s.err = ErrSamplerNotInitialized
 		return false
@@ -180,7 +176,7 @@ func (s RS2Sampler[YT]) Next() bool {
 		end   = s.batchOffset + s.batchSize
 	)
 
-	if start >= len(s.data.X)*int(s.subsetRatio) {
+	if start >= int(float64(len(s.data.X))*s.subsetRatio) {
 		// Subset fully consumed, end epoch.
 		return false
 	}

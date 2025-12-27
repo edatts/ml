@@ -11,4 +11,6 @@ var (
 	ErrBatchSize             = errors.New("batch size must be positive and non-zero")
 	ErrNoBatch               = errors.New("the sampler does not have a batch available")
 	ErrInvalidSubsetRatio    = errors.New("sampling subset ratio for RS2 must be between 0.01 and 1 inclusive")
+	ErrDataLengths           = errors.New("samples and targets are different lengths")
+	ErrTargetsDataType       = errors.New("dataset targets are wrong type")
 )

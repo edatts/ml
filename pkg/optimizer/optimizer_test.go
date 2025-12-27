@@ -8,6 +8,68 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestOptimizer(t *testing.T) {
+
+	trainDataProvider := func() ([][]float32, any, error) {
+		return [][]float32{{1}, {2}, {3}}, [][]float32{{2}, {4}, {6}}, nil
+	}
+
+	testDataProvider := func() ([][]float32, any, error) {
+		return [][]float32{{4}, {5}, {6}}, [][]float32{{8}, {10}, {12}}, nil
+	}
+
+	t.Run("Instantiate and Run", func(t *testing.T) {
+		o := optimizer.New(
+			optimizer.WithNumEpochs(3),
+			optimizer.WithBatchSize(1),
+			optimizer.WithLoggingInterval(1),
+			optimizer.WithTrainDataProvider(trainDataProvider),
+			optimizer.WithTestDataProvider(testDataProvider),
+			optimizer.WithSampler(&optimizer.DefaultSampler[float32]{}),
+		)
+
+		require.NoError(t, o.Run(&mockModel{}))
+	})
+
+	t.Run("Errors on missing components", func(t *testing.T) {
+		o := optimizer.New()
+
+		err := o.Run(nil)
+		require.Error(t, err)
+		require.ErrorIs(t, err, optimizer.ErrNoModel)
+
+		err = o.Run(&mockModel{})
+		require.Error(t, err)
+		require.ErrorIs(t, err, optimizer.ErrNoSampler)
+
+		o = optimizer.New(
+			optimizer.WithSampler(optimizer.NewConvenienceSampler[float32]()),
+		)
+
+		err = o.Run(&mockModel{})
+		require.Error(t, err)
+		require.ErrorIs(t, err, optimizer.ErrNoDataProvider)
+
+		o = optimizer.New(
+			optimizer.WithSampler(optimizer.NewConvenienceSampler[float32]()),
+			optimizer.WithTrainDataProvider(trainDataProvider),
+		)
+
+		err = o.Run(&mockModel{})
+		require.Error(t, err)
+		require.ErrorIs(t, err, optimizer.ErrNoDataProvider)
+
+		o = optimizer.New(
+			optimizer.WithSampler(optimizer.NewConvenienceSampler[float32]()),
+			optimizer.WithTrainDataProvider(trainDataProvider),
+			optimizer.WithTestDataProvider(testDataProvider),
+		)
+
+		require.NoError(t, o.Run(&mockModel{}))
+	})
+
+}
+
 var _ model.Model = &mockModel{}
 
 // Mock modal will multiply all inputs by 2
@@ -34,30 +96,4 @@ func (m *mockModel) Weights() [][]float32 {
 
 func (m *mockModel) SumSquaredWeights() float64 {
 	return 0
-}
-
-func TestOptimizer(t *testing.T) {
-
-	t.Run("Instantiate and Run", func(t *testing.T) {
-
-	})
-
-	trainingDataProvider := func() ([][]float32, any, error) {
-		return [][]float32{{1}, {2}, {3}}, [][]float32{{2}, {4}, {6}}, nil
-	}
-
-	testDataProvider := func() ([][]float32, any, error) {
-		return [][]float32{{4}, {5}, {6}}, [][]float32{{8}, {10}, {12}}, nil
-	}
-
-	o := optimizer.New(
-		optimizer.WithNumEpochs(3),
-		optimizer.WithBatchSize(1),
-		optimizer.WithLoggingInterval(1),
-		optimizer.WithTrainDataProvider(trainingDataProvider),
-		optimizer.WithTestDataProvider(testDataProvider),
-		optimizer.WithSampler(&optimizer.DefaultSampler[float32]{}),
-	)
-
-	require.NoError(t, o.Run(&mockModel{}))
 }

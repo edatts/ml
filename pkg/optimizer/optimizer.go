@@ -85,7 +85,7 @@ func (o *optimizer) train() error {
 		return fmt.Errorf("failed initializing training run: %w", err)
 	}
 
-	for epoch := o.sampler.NewEpoch(); epoch < o.cfg.numEpochs; epoch = o.sampler.NewEpoch() {
+	for epoch := o.sampler.NewEpoch(); epoch <= o.cfg.numEpochs; epoch = o.sampler.NewEpoch() {
 		for o.sampler.Next() { // Returns false at end of epoch
 			if err := o.currentRun.Step(); err != nil {
 				return fmt.Errorf("failed step: %w", err)
@@ -193,8 +193,6 @@ func (o *optimizer) Regress(inputs [][]float32, targets [][]float32) ([][]float3
 }
 
 func (o *optimizer) test() error {
-	// panic("optimizer.test() is unimplemented")
-
 	X, Y, err := o.testDataProvider()
 	if err != nil {
 		return fmt.Errorf("failed getting test data: %w", err)
@@ -206,13 +204,26 @@ func (o *optimizer) test() error {
 			return fmt.Errorf("failed asserting test targets to [][]int, type of data is %T", Y)
 		}
 
-		outputs, grads, acc, loss, err := o.Classify(X, targets)
+		_, _, acc, loss, err := o.Classify(X, targets)
 		if err != nil {
 			return fmt.Errorf("failed classifying: %w", err)
 		}
 
+		slog.Info("test results", "accuracy", acc, "loss", loss)
+		return nil
 	}
 
+	targets, ok := Y.([][]float32)
+	if !ok {
+		return fmt.Errorf("failed asserting test targets to [][]int, type of data is %T", Y)
+	}
+
+	_, _, loss, regLoss, err := o.Regress(X, targets)
+	if err != nil {
+		return fmt.Errorf("failed classifying: %w", err)
+	}
+
+	slog.Info("test results", "loss", loss, "regLoss", regLoss)
 	return nil
 }
 
@@ -222,6 +233,7 @@ func (o *optimizer) saveWeights() error {
 	}
 
 	// Write weights to disk. What format? Where on disk?
+	slog.Warn("saveWeights is unimplemented")
 
 	return nil
 }
