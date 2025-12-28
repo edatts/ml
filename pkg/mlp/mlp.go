@@ -8,9 +8,9 @@ import (
 	"github.com/edatts/ml/pkg/model"
 )
 
-// TODO: We need to relocate all the optimizer logic to the optimizer pkg and
-// leave only the necessary logic for Forward passes and Backpropagation. As
-// part of this refactor *MLP should satisfy the model.Model interface.
+// TODO: Currently the MLP model has a hard-coded hidden layer width, we
+// should refactor to support flexible model architectures.
+
 var _ model.Model = &MLP{}
 
 type MLP struct {

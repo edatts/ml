@@ -7,11 +7,18 @@ import (
 	"github.com/edatts/ml/pkg/model"
 )
 
+// Not too happy about this interface because it means we rely on the Optimizer
+// to easily run inference with Classify() and Regress(). It might be better to
+// have the optimizer as component of the model...
 type Optimizer interface {
-	Run() error
+	Run(model.Model) error
+	Classify(inputs [][]float32, targets [][]int) (outputs [][]float32, grads [][]float32, accuracy float64, regLoss float64, err error)
+	Regress(inputs [][]float32, targets [][]float32) (outputs [][]float32, grads [][]float32, loss float64, regLoss float64, err error)
 }
 
 type dataProvider func() ([][]float32, any, error)
+
+var _ Optimizer = &optimizer{}
 
 type optimizer struct {
 	cfg               Config
@@ -24,7 +31,7 @@ type optimizer struct {
 
 type option func(o *optimizer)
 
-func New(optFns ...option) *optimizer {
+func New(optFns ...option) Optimizer {
 	o := &optimizer{
 		cfg: NewConfig(),
 	}
