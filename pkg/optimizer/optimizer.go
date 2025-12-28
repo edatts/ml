@@ -86,6 +86,7 @@ func (o *optimizer) train() error {
 	}
 
 	for epoch := o.sampler.NewEpoch(); epoch <= o.cfg.numEpochs; epoch = o.sampler.NewEpoch() {
+		o.currentRun.NewEpoch()
 		for o.sampler.Next() { // Returns false at end of epoch
 			if err := o.currentRun.Step(); err != nil {
 				return fmt.Errorf("failed step: %w", err)
@@ -145,6 +146,9 @@ func (o *optimizer) Classify(inputs [][]float32, targets [][]int) ([][]float32, 
 	if err != nil {
 		return nil, nil, 0, 0, fmt.Errorf("failed forward pass: %w", err)
 	}
+
+	// slog.Info("outputs", "outputs", outputs[0])
+	// slog.Info("targets", "targets", targets[0])
 
 	// Could make this configurable? Are there any other common calssification loss algorithms?
 	loss, err := CategoricalCrossEntropy(outputs, targets)

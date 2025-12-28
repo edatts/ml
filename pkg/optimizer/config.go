@@ -16,6 +16,7 @@ func NewConfig() Config {
 		numEpochs:      10,
 		batchSize:      32,
 		learningRate:   0.01,
+		lambda:         2.5e-5,
 		trainLogWindow: 20,
 	}
 }

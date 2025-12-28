@@ -62,6 +62,14 @@ func NewFromData(numRows, numCols int, data []float32) (*Matrix, error) {
 	}, nil
 }
 
+func (m *Matrix) AsSlices() [][]float32 {
+	var out = make([][]float32, m.NumRows())
+	for i := range m.NumRows() {
+		out[i] = m.Row(i)
+	}
+	return out
+}
+
 func (m *Matrix) Data() []float32 {
 	return m.data
 }
@@ -143,10 +151,13 @@ func (m *Matrix) AvgCols() []float32 {
 // the result in the matrix m. It returns an error if any of the matrices
 // are not compatible shapes for the operation.
 func (m *Matrix) Mul(A, B *Matrix) error {
-	// TODO: If we want to use this in our NN implementations then we need to
-	// 		 zero the output matrix before starting to accmulate results...
 	if err := m.mulValidate(A, B); err != nil {
 		return err
+	}
+
+	// Zero data slice before we start to accumulate results
+	for i := range m.data {
+		m.data[i] = 0
 	}
 
 	var (
@@ -236,7 +247,7 @@ func (m *Matrix) Mul(A, B *Matrix) error {
 
 func (m *Matrix) mulValidate(A, B *Matrix) error {
 	if m == nil || A == nil || B == nil {
-		return fmt.Errorf("one of more matrices are nil")
+		return fmt.Errorf("one or more matrices are nil")
 	}
 
 	if A.NumRows() == 0 || A.NumCols() == 0 {
@@ -248,7 +259,7 @@ func (m *Matrix) mulValidate(A, B *Matrix) error {
 	}
 
 	if m.NumRows() != A.NumRows() || m.NumCols() != B.NumCols() {
-		return fmt.Errorf("output matrix is not the correct dimensions")
+		return fmt.Errorf("output matrix is not the correct dimensions, expected %d rows and %d cols, got %d rows and %d cols", A.NumRows(), B.NumCols(), m.NumRows(), m.NumCols())
 	}
 
 	return nil

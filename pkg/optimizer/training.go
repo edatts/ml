@@ -6,6 +6,7 @@ import (
 )
 
 type TrainingRun interface {
+	NewEpoch()
 	Step() error
 	isTrainingRun()
 }
@@ -22,12 +23,23 @@ var _ TrainingRun = &ClassificationRun{}
 type ClassificationRun struct {
 	optimizer           *optimizer
 	sampler             ClassificationSampler
-	epoch               int
 	numBatches          int
+	epoch               int
+	epochBatches        int
 	currentLearningRate float64
 	lrDecay             float64
-	accuracy            float64
-	regLoss             float64
+
+	lastAccuracy float64
+	lastRegLoss  float64
+	accuracySum  float64
+	regLossSum   float64
+}
+
+func (c *ClassificationRun) NewEpoch() {
+	c.epoch++
+	c.epochBatches = 0
+	c.accuracySum = 0
+	c.regLossSum = 0
 }
 
 func (c *ClassificationRun) Step() error {
@@ -50,8 +62,11 @@ func (c *ClassificationRun) Step() error {
 	}
 
 	c.numBatches++
-	c.accuracy += acc
-	c.regLoss += regLoss
+	c.epochBatches++
+	c.lastAccuracy = acc
+	c.lastRegLoss = regLoss
+	c.accuracySum += acc
+	c.regLossSum += regLoss
 	if c.numBatches%c.optimizer.cfg.trainLogWindow == 0 {
 		slog.Info("training info", "run", c)
 	}
@@ -74,20 +89,33 @@ func (c *ClassificationRun) LogValue() slog.Value {
 		slog.Any("epoch", c.epoch),
 		slog.Any("batchNum", c.numBatches),
 		slog.Any("lr", c.currentLearningRate),
-		slog.Any("accuracy", c.accuracy),
-		slog.Any("regLoss", c.regLoss),
+		// slog.Any("lastAccuracy", c.lastAccuracy),
+		slog.Any("epochAccuracy", c.accuracySum/float64(c.epochBatches)),
+		// slog.Any("lastRegLoss", c.lastRegLoss),
+		slog.Any("epochRegLoss", c.regLossSum/float64(c.epochBatches)),
 	)
 }
 
 type RegressionRun struct {
 	optimizer           *optimizer
 	sampler             RegressionSampler
-	epoch               int
 	numBatches          int
+	epoch               int
+	epochBatches        int
 	currentLearningRate float64
 	lrDecay             float64
-	loss                float64
-	regLoss             float64
+
+	lastLoss    float64
+	lossSum     float64
+	lastRegLoss float64
+	regLossSum  float64
+}
+
+func (r *RegressionRun) NewEpoch() {
+	r.epoch++
+	r.epochBatches = 0
+	r.lossSum = 0
+	r.regLossSum = 0
 }
 
 func (r *RegressionRun) Step() error {
@@ -106,12 +134,15 @@ func (r *RegressionRun) Step() error {
 
 	_, dCdA, loss, regLoss, err := r.optimizer.Regress(batch.Inputs, batch.Targets)
 	if err != nil {
-		return fmt.Errorf("failed classifying: %w", err)
+		return fmt.Errorf("failed regressing: %w", err)
 	}
 
 	r.numBatches++
-	r.loss += loss
-	r.regLoss += regLoss
+	r.epochBatches++
+	r.lastLoss = loss
+	r.lastRegLoss = regLoss
+	r.lossSum += loss
+	r.regLossSum += regLoss
 	if r.numBatches%r.optimizer.cfg.trainLogWindow == 0 {
 		slog.Info("training info", "run", r)
 	}
@@ -132,7 +163,9 @@ func (r *RegressionRun) LogValue() slog.Value {
 		slog.Any("epoch", r.epoch),
 		slog.Any("batchNum", r.numBatches),
 		slog.Any("lr", r.currentLearningRate),
-		slog.Any("loss", r.loss),
-		slog.Any("regLoss", r.regLoss),
+		// slog.Any("lastLoss", r.lastLoss),
+		slog.Any("epochAccuracy", r.lossSum/float64(r.epochBatches)),
+		// slog.Any("lastRegLoss", r.lastRegLoss),
+		slog.Any("epochRegLoss", r.regLossSum/float64(r.epochBatches)),
 	)
 }

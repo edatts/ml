@@ -373,22 +373,24 @@ func (l *conv2D) Backward() error {
 
 		// dC/prevA = dz/dprevA * dC/dz
 		// dC/prevA = W * dC/dz
-		kernelMatrix, err := l.getKernelMatrix()
-		if err != nil {
-			return fmt.Errorf("failed getting kernel matrix: %w", err)
-		}
+		if l.prev.activationDeltas() != nil { // Only if prev is not input...
+			kernelMatrix, err := l.getKernelMatrix()
+			if err != nil {
+				return fmt.Errorf("failed getting kernel matrix: %w", err)
+			}
 
-		dCdAMatrix := mat.New(dCdZMatrix.NumRows(), kernelMatrix.NumRows())
-		if err := dCdAMatrix.Mul(dCdZMatrix, kernelMatrix.Traspose()); err != nil {
-			return fmt.Errorf("faileded mulitplyig dCdz and weights: %w", err)
-		}
+			dCdAMatrix := mat.New(dCdZMatrix.NumRows(), kernelMatrix.NumRows())
+			if err := dCdAMatrix.Mul(dCdZMatrix, kernelMatrix.Traspose()); err != nil {
+				return fmt.Errorf("faileded mulitplyig dCdz and weights: %w", err)
+			}
 
-		prevActDeltas, err := NewSampleFromData(l.prev.Shape(), dCdAMatrix.Data())
-		if err != nil {
-			return fmt.Errorf("failed instantiating prev layers activation delta sample: %w", err)
-		}
+			prevActDeltas, err := NewSampleFromData(l.prev.Shape(), dCdAMatrix.Data())
+			if err != nil {
+				return fmt.Errorf("failed instantiating prev layers activation delta sample: %w", err)
+			}
 
-		l.prev.activationDeltas()[i] = prevActDeltas
+			l.prev.activationDeltas()[i] = prevActDeltas
+		}
 	}
 
 	// Average weight and bias deltas over batch
@@ -786,7 +788,7 @@ type output struct {
 }
 
 // This receiver overrides the one from the embedded fully conencted layer
-// this is so that we can apply the softmax activation to the
+// this is so that we can apply the softmax activation to the logits
 func (l *output) batch() []Sample {
 	var out = make([]Sample, len(l.fullyConnected.batch()))
 	for i, sample := range l.fullyConnected.batch() {

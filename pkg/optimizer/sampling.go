@@ -18,6 +18,7 @@ import (
 
 type Sampler interface {
 	NewEpoch() int
+	Epoch() int
 	Init(batchSize int, dataProvider func() ([][]float32, any, error)) error
 	Next() bool
 	Err() error
@@ -44,6 +45,10 @@ type baseSampler[YT Numeric] struct {
 	err         error
 }
 
+func (s *baseSampler[YT]) Epoch() int {
+	return s.epoch
+}
+
 func (s *baseSampler[YT]) Init(batchSize int, provider func() ([][]float32, any, error)) error {
 	if batchSize <= 0 {
 		return ErrBatchSize
@@ -67,6 +72,24 @@ func (s *baseSampler[YT]) Init(batchSize int, provider func() ([][]float32, any,
 	if len(s.data.X) != len(s.data.Y) {
 		return fmt.Errorf("%w, len(samples)=%d, len(targets)=%d", ErrDataLengths, len(s.data.X), len(s.data.Y))
 	}
+
+	// for i := range samples {
+	// 	if i >= 5 {
+	// 		break
+	// 	}
+
+	// 	slog.Info("target", "target", s.data.Y[i])
+
+	// 	for j := range len(samples[i]) / 28 {
+	// 		var row []byte
+	// 		for _, elem := range samples[i][j*28 : j*28+28] {
+	// 			row = append(row, byte(int(elem*256)))
+	// 		}
+	// 		// fmt.Printf("%x\n", samples[i][j*28:j*28+28])
+	// 		slog.Info("data", "row", fmt.Sprintf("%x", row))
+	// 	}
+	// 	fmt.Println()
+	// }
 
 	s.initialized = true
 	return nil

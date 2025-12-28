@@ -4,16 +4,21 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+
+	"github.com/edatts/ml/pkg/model"
 )
 
 // TODO: We need to relocate all the optimizer logic to the optimizer pkg and
-// leave only the necessary logic for Forward passes and Backpropagation.
-// var _ model.Model = &MLP{}
+// leave only the necessary logic for Forward passes and Backpropagation. As
+// part of this refactor *MLP should satisfy the model.Model interface.
+var _ model.Model = &MLP{}
+
+// TODO: Update MLP to use *mat.Matrix.
 
 type MLP struct {
 	lambda float64 // Regularization factor
 
-	Layers []*layer
+	Layers []Layer
 
 	classification bool
 }
@@ -38,64 +43,60 @@ func New(inputSize, outputSize, numHidden int, opts ...Option) (*MLP, error) {
 		return nil, errors.New("hidden layers must be positive or zero")
 	}
 
-	m := &MLP{lambda: 2.5e-5, Layers: make([]*layer, numHidden+2)}
+	m := &MLP{lambda: 2.5e-5, Layers: make([]Layer, numHidden+2)}
 	for _, optFn := range opts {
 		optFn(m)
 	}
 
-	m.Layers[0] = m.newLayer(Input, int16(inputSize), nil, m.lambda)
+	m.Layers[0] = m.newLayer(Input, inputSize, nil, m.lambda)
 
 	for i := range numHidden {
 		l := m.newLayer(Hidden, 512, m.Layers[i], m.lambda)
 		m.Layers[i+1] = l
 	}
 
-	m.Layers[len(m.Layers)-1] = m.newLayer(Output, int16(outputSize), m.Layers[len(m.Layers)-2], m.lambda)
+	m.Layers[len(m.Layers)-1] = m.newLayer(Output, outputSize, m.Layers[len(m.Layers)-2], m.lambda)
 
 	return m, nil
 }
 
-func (m *MLP) inputLayer() *layer {
+func (m *MLP) inputLayer() Layer {
 	return m.Layers[0]
 }
 
-func (m *MLP) outputLayer() *layer {
+func (m *MLP) outputLayer() Layer {
 	return m.Layers[len(m.Layers)-1]
 }
 
 func (m *MLP) inputLen() int {
-	return int(m.inputLayer().width)
+	return int(m.inputLayer().width())
 }
 
 func (m *MLP) outputLen() int {
-	return int(m.outputLayer().width)
+	return int(m.outputLayer().width())
 }
 
-func (m *MLP) sumWeights() float64 {
-	var sum float64
-	for _, layer := range m.Layers[1:] {
-		for _, row := range layer.weights {
-			for _, w := range row {
-				sum += w
-			}
-		}
-	}
-	return sum
-}
+// func (m *MLP) sumWeights() float32 {
+// 	var sum float32
+// 	for _, layer := range m.Layers[1:] {
+// 		for _, row := range layer.weights.AsSlices() {
+// 			for _, w := range row {
+// 				sum += w
+// 			}
+// 		}
+// 	}
+// 	return sum
+// }
 
 func (m *MLP) SumSquaredWeights() float64 {
 	var sum float64
 	for _, layer := range m.Layers[1:] {
-		for _, row := range layer.weights {
-			for _, w := range row {
-				sum += w * w
-			}
-		}
+		sum += layer.sumSquaredWeights()
 	}
 	return sum
 }
 
-func (m *MLP) Forward(batch [][]float64) ([][]float64, error) {
+func (m *MLP) Forward(batch [][]float32) ([][]float32, error) {
 	if len(m.Layers) < 2 {
 		return nil, ErrNotEnoughLayers
 	}
@@ -108,17 +109,26 @@ func (m *MLP) Forward(batch [][]float64) ([][]float64, error) {
 		return nil, fmt.Errorf("len(batch)=%d, len(row)=%d: %w", len(batch), len(batch[0]), ErrInvalidInputSize)
 	}
 
-	// Set activaitons of input layer
-	m.inputLayer().activations = batch
+	// Set activations of input layer
+	m.inputLayer().init(len(batch))
+	for i := range m.inputLayer().activations().NumRows() {
+		for j := range m.inputLayer().activations().Row(i) {
+			m.inputLayer().activations().Row(i)[j] = batch[i][j]
+		}
+	}
 
 	// Forward
-	for _, l := range m.Layers[1:] {
+	for i, l := range m.Layers[1:] {
+		// Can we break this out somewhere else...
 		l.init(len(batch))
-		l.Forward()
+
+		if err := l.Forward(); err != nil {
+			return nil, fmt.Errorf("layer %d failed forward pass: %w", i, err)
+		}
 	}
 
 	// Collect outputs
-	return m.outputLayer().activations, nil
+	return m.outputLayer().activations().AsSlices(), nil
 
 	// // TODO: Add layer init func and zero the gradients.
 	// //		 We could also check the previous batch size and
@@ -168,76 +178,85 @@ func (m *MLP) Forward(batch [][]float64) ([][]float64, error) {
 	// return outputs, nil
 }
 
-func (m *MLP) Regress(batch [][]float64, y [][]float64) ([][]float64, float64, float64, error) {
-	outputs, err := m.Forward(batch)
-	if err != nil {
-		return nil, 0, 0, err
-	}
+// func (m *MLP) Regress(batch [][]float64, y [][]float64) ([][]float64, float64, float64, error) {
+// 	outputs, err := m.Forward(batch)
+// 	if err != nil {
+// 		return nil, 0, 0, err
+// 	}
 
-	loss, err := MeanSquaredError(outputs, y)
-	if err != nil {
-		return nil, 0, 0, err
-	}
+// 	loss, err := MeanSquaredError(outputs, y)
+// 	if err != nil {
+// 		return nil, 0, 0, err
+// 	}
 
-	// Derivative of our loss with respect to the predictions is 2(ŷ - y)
-	// Set the activations of output layer to the deriv of loss for backwards pass
-	for i, pred := range outputs {
-		for j, actual := range y[i] {
-			m.outputLayer().dCdA[i][j] = 2 * (pred[j] - actual)
-			// neuron := m.outputNeurons()[j]
-			// neuron.dCdA[i] = 2 * (pred[j] - actual)
-		}
-	}
+// 	// Derivative of our loss with respect to the predictions is 2(ŷ - y)
+// 	// Set the activations of output layer to the deriv of loss for backwards pass
+// 	for i, pred := range outputs {
+// 		for j, actual := range y[i] {
+// 			m.outputLayer().dCdA[i][j] = 2 * (pred[j] - actual)
+// 			// neuron := m.outputNeurons()[j]
+// 			// neuron.dCdA[i] = 2 * (pred[j] - actual)
+// 		}
+// 	}
 
-	// Regularize the loss with L2 regularization
-	// 0.5 * lambda * sum(W^2)
-	regLoss := 0.5 * m.lambda * m.SumSquaredWeights()
+// 	// Regularize the loss with L2 regularization
+// 	// 0.5 * lambda * sum(W^2)
+// 	regLoss := 0.5 * m.lambda * m.SumSquaredWeights()
 
-	return outputs, loss, loss + regLoss, nil
-}
+// 	return outputs, loss, loss + regLoss, nil
+// }
 
-func (m *MLP) Classify(batch [][]float64, y [][]int) ([][]float64, float64, float64, error) {
-	outputs, err := m.Forward(batch)
-	if err != nil {
-		return nil, 0, 0, err
-	}
+// func (m *MLP) Classify(batch [][]float64, y [][]int) ([][]float64, float64, float64, error) {
+// 	outputs, err := m.Forward(batch)
+// 	if err != nil {
+// 		return nil, 0, 0, err
+// 	}
 
-	loss, err := CategoricalCrossEntropy(outputs, y)
-	if err != nil {
-		return nil, 0, 0, err
-	}
+// 	loss, err := CategoricalCrossEntropy(outputs, y)
+// 	if err != nil {
+// 		return nil, 0, 0, err
+// 	}
 
-	// Derivative of our loss with respect to the predicitons is ŷ - y, this
-	// includes the derivative of SoftMax in the derivation so that is not
-	// accounted for in the backwards pass of the output layer.
-	for i, pred := range outputs {
-		for j, actual := range y[i] {
-			m.outputLayer().dCdA[i][j] = pred[j] - float64(actual)
-			// neuron := m.outputNeurons()[j]
-			// neuron.dCdA[i] = neuron.activations[i] - float64(actual)
-		}
-	}
+// 	// Derivative of our loss with respect to the predicitons is ŷ - y, this
+// 	// includes the derivative of SoftMax in the derivation so that is not
+// 	// accounted for in the backwards pass of the output layer.
+// 	for i, pred := range outputs {
+// 		for j, actual := range y[i] {
+// 			m.outputLayer().dCdA[i][j] = pred[j] - float64(actual)
+// 			// neuron := m.outputNeurons()[j]
+// 			// neuron.dCdA[i] = neuron.activations[i] - float64(actual)
+// 		}
+// 	}
 
-	// Regularize the loss with L2 regularization
-	// 0.5 * lambda * sum(W^2)
-	regLoss := 0.5 * m.lambda * m.SumSquaredWeights()
+// 	// Regularize the loss with L2 regularization
+// 	// 0.5 * lambda * sum(W^2)
+// 	regLoss := 0.5 * m.lambda * m.SumSquaredWeights()
 
-	return outputs, Accuracy(outputs, y), loss + regLoss, nil
-}
+// 	return outputs, Accuracy(outputs, y), loss + regLoss, nil
+// }
 
-func (m *MLP) Backward(lr float64) error {
+func (m *MLP) Backward(dCdA [][]float32, lr float64) error {
 	// For now only batch size of 1 supported
 	// if len(outputs) != 1 || len(y) != 1 {
 	// 	return errors.New("only batch size of 1 is currently supported for training")
 	// }
 
+	// Set gradient of output layer
+	for i := range len(dCdA) {
+		for j := range len(dCdA[0]) {
+			m.outputLayer().grads().Row(i)[j] = dCdA[i][j]
+		}
+	}
+
 	// Exclude input layer from backwards pass
 	for i := len(m.Layers) - 1; i >= 1; i-- {
-		m.Layers[i].Backward()
+		if err := m.Layers[i].Backward(); err != nil {
+			return fmt.Errorf("layer %d failed backwards pass: %w", i+1, err)
+		}
 	}
 
 	for i := len(m.Layers) - 1; i >= 1; i-- {
-		m.Layers[i].Update(lr)
+		m.Layers[i].update(lr)
 	}
 
 	return nil
@@ -254,23 +273,23 @@ func Accuracy(predictions [][]float64, y [][]int) float64 {
 	return float64(numCorrect) / float64(len(predictions)) * 100
 }
 
-func (m *MLP) LogWeights() {
-	for _, l := range m.Layers[1:] {
-		l.logWweights()
-	}
-}
+// func (m *MLP) LogWeights() {
+// 	for _, l := range m.Layers[1:] {
+// 		l.logWweights()
+// 	}
+// }
 
-func (m *MLP) LogBiases() {
-	for _, l := range m.Layers[1:] {
-		l.logBiases()
-	}
-}
+// func (m *MLP) LogBiases() {
+// 	for _, l := range m.Layers[1:] {
+// 		l.logBiases()
+// 	}
+// }
 
-func (m *MLP) LogGrads() {
-	for _, l := range m.Layers[1:] {
-		l.logGrads()
-	}
-}
+// func (m *MLP) LogGrads() {
+// 	for _, l := range m.Layers[1:] {
+// 		l.logGrads()
+// 	}
+// }
 
 // func (m *MLP) LogActivations() {
 // 	for _, l := range m.Layers[3:] {
@@ -278,11 +297,11 @@ func (m *MLP) LogGrads() {
 // 	}
 // }
 
-func (m *MLP) LogLossDeriv() {
-	for _, l := range m.Layers[1:] {
-		l.logLossDeriv()
-	}
-}
+// func (m *MLP) LogLossDeriv() {
+// 	for _, l := range m.Layers[1:] {
+// 		l.logLossDeriv()
+// 	}
+// }
 
 // func (m *MLP) LogLogits() {
 // 	for _, l := range m.Layers[3:] {

@@ -17,6 +17,7 @@ import (
 
 	"github.com/edatts/ml/pkg/idx"
 	"github.com/edatts/ml/pkg/mlp"
+	"github.com/edatts/ml/pkg/optimizer"
 	"github.com/go-echarts/go-echarts/v2/components"
 	"github.com/stretchr/testify/require"
 )
@@ -38,13 +39,13 @@ func httpHandler(rw http.ResponseWriter, _ *http.Request) {
 
 func TestActivation(t *testing.T) {
 	t.Run("softmax", func(t *testing.T) {
-		values := []float64{4.8, 1.21, 2.385}
-		expected := []float64{0.8952826639572619, 0.02470830678209937, 0.0800090292606387}
+		values := []float32{4.8, 1.21, 2.385}
+		expected := []float32{0.8952827, 0.024708305, 0.08000901}
 		require.Equal(t, expected, mlp.SoftMax{}.Forward(values))
 	})
 
 	t.Run("relu", func(t *testing.T) {
-		require.Equal(t, [][]float64{{4.8}, {0}}, [][]float64{mlp.ReLU{}.Forward([]float64{4.8}), mlp.ReLU{}.Forward([]float64{-1.21})})
+		require.Equal(t, [][]float32{{4.8}, {0}}, [][]float32{[]float32{mlp.ReLU{}.Forward(4.8)}, []float32{mlp.ReLU{}.Forward(-1.21)}})
 	})
 }
 
@@ -320,37 +321,52 @@ func TestMLP(t *testing.T) {
 		model, err := mlp.New(784, 10, 3, mlp.WithClassifcation())
 		require.NoError(t, err)
 
-		var (
-			numEpochs    = 5
-			batchSize    = 64
-			learningRate = 0.05
+		o := optimizer.New(
+			optimizer.WithClassification(),
+			optimizer.WithNumEpochs(12),
+			optimizer.WithBatchSize(126),
+			optimizer.WithLearningRate(0.05),
+			optimizer.WithLearningRateDecay(0.001),
+			optimizer.WithSampler(optimizer.NewRS2Sampler[int](0.20)),
+			// optimizer.WithSampler(optimizer.NewConvenienceSampler[int]()),
+			optimizer.WithTrainDataProvider(func() ([][]float32, any, error) { return X_train, Y_train, nil }),
+			optimizer.WithTestDataProvider(func() ([][]float32, any, error) { return X_test, Y_test, nil }),
 		)
 
 		slog.Info("starting model training...")
-		for epoch := 1; epoch <= numEpochs; epoch++ {
-			var accSum, lossSum float64
-			var numBatches int
-			for _, batch := range selectBatches(batchSize, X_train, Y_train, 0.20) {
-				_, acc, loss, err := model.Classify(batch.Inputs, batch.Targets)
-				require.NoError(t, err)
-				accSum += acc
-				lossSum += loss
-				numBatches++
 
-				if numBatches%20 == 0 {
-					slog.Info("training info", "epoch", epoch, "lr", learningRate, "loss", lossSum/float64(20), "accuracy", accSum/float64(20))
-					accSum, lossSum = 0, 0
-				}
+		require.NoError(t, o.Run(model))
 
-				require.NoError(t, model.Backward(learningRate))
-				learningRate *= 0.99925
-			}
-		}
+		// var (
+		// 	numEpochs    = 5
+		// 	batchSize    = 64
+		// 	learningRate = 0.05
+		// )
 
-		_, acc, loss, err := model.Classify(X_test, Y_test)
-		require.NoError(t, err)
+		// for epoch := 1; epoch <= numEpochs; epoch++ {
+		// 	var accSum, lossSum float64
+		// 	var numBatches int
+		// 	for _, batch := range selectBatches(batchSize, X_train, Y_train, 0.20) {
+		// 		_, acc, loss, err := model.Classify(batch.Inputs, batch.Targets)
+		// 		require.NoError(t, err)
+		// 		accSum += acc
+		// 		lossSum += loss
+		// 		numBatches++
 
-		slog.Info("testing info", "loss", loss, "accuracy", acc)
+		// 		if numBatches%20 == 0 {
+		// 			slog.Info("training info", "epoch", epoch, "lr", learningRate, "loss", lossSum/float64(20), "accuracy", accSum/float64(20))
+		// 			accSum, lossSum = 0, 0
+		// 		}
+
+		// 		require.NoError(t, model.Backward(learningRate))
+		// 		learningRate *= 0.99925
+		// 	}
+		// }
+
+		// _, acc, loss, err := model.Classify(X_test, Y_test)
+		// require.NoError(t, err)
+
+		// slog.Info("testing info", "loss", loss, "accuracy", acc)
 
 	})
 
@@ -481,22 +497,22 @@ func loadMNISTDataFromCsv(t *testing.T) ([][]string, [][]string, [][]string, [][
 	return fileContents[0], fileContents[1], fileContents[2], fileContents[3]
 }
 
-func formatMNISTData(t *testing.T, train, test [][]int, Y_train, Y_test [][]int) ([][]float64, [][]float64) {
+func formatMNISTData(t *testing.T, train, test [][]int, Y_train, Y_test [][]int) ([][]float32, [][]float32) {
 	// Scale image data
-	var X_train = make([][]float64, len(train))
+	var X_train = make([][]float32, len(train))
 	for i, sample := range train {
-		var scaled = make([]float64, len(sample))
+		var scaled = make([]float32, len(sample))
 		for j, num := range sample {
-			scaled[j] = float64(num) / 255
+			scaled[j] = float32(num) / 255
 		}
 		X_train[i] = scaled
 	}
 
-	var X_test = make([][]float64, len(test))
+	var X_test = make([][]float32, len(test))
 	for i, sample := range test {
-		var scaled = make([]float64, len(sample))
+		var scaled = make([]float32, len(sample))
 		for j, num := range sample {
-			scaled[j] = float64(num) / 255
+			scaled[j] = float32(num) / 255
 		}
 		X_test[i] = scaled
 	}

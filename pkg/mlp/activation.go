@@ -7,64 +7,48 @@ import (
 )
 
 type ActivationFunc interface {
-	Forward([]float64) []float64
-	Backward([]float64) []float64
+	Forward(float32) float32
+	Backward(float32) float32
 }
 
 type NoOp struct{}
 
-func (n NoOp) Forward(in []float64) []float64 {
+func (n NoOp) Forward(in float32) float32 {
 	return in
 }
 
-func (n NoOp) Backward(in []float64) []float64 {
-	return slices.Repeat([]float64{1}, len(in))
+func (n NoOp) Backward(in float32) float32 {
+	return 1
 }
 
 // y = 1/(1+e^-x)
 type Sigmoid struct{}
 
-func (s Sigmoid) Forward(in []float64) []float64 {
-	var out = make([]float64, len(in))
-	for i, val := range in {
-		out[i] = 1 / (1 + math.Exp(-val))
-	}
-
-	return out
+func (s Sigmoid) Forward(in float32) float32 {
+	return 1 / (1 + float32(math.Exp(-float64(in))))
 }
 
-func (s Sigmoid) Backward(in []float64) []float64 {
-	var out = make([]float64, len(in))
-	for i, val := range in {
-		out[i] = val * (1 - val)
-	}
-
-	return out
+func (s Sigmoid) Backward(in float32) float32 {
+	return in * (1 - in)
 }
 
 type ReLU struct{}
 
-func (r ReLU) Forward(in []float64) []float64 {
-	var out = make([]float64, len(in))
-	for i, val := range in {
-		if val > 0 {
-			out[i] = val
-		}
+func (r ReLU) Forward(in float32) float32 {
+	if in > 0 {
+		return in
 	}
-	return out
+	return 0
 }
 
-func (r ReLU) Backward(in []float64) []float64 {
-	var out = make([]float64, len(in))
-	for i, val := range in {
-		if val > 0 {
-			out[i] = 1
-		}
+func (r ReLU) Backward(in float32) float32 {
+	if in > 0 {
+		return 1
 	}
-	return out
+	return 0
 }
 
-func LeakyReLU(in float64) float64 {
+func LeakyReLU(in float32) float32 {
 	if in > 0 {
 		return in
 	}
@@ -73,19 +57,19 @@ func LeakyReLU(in float64) float64 {
 
 type SoftMax struct{}
 
-func (s SoftMax) Forward(in []float64) []float64 {
+func (s SoftMax) Forward(in []float32) []float32 {
 	if len(in) == 0 {
 		return in
 	}
 
 	var (
-		out = make([]float64, len(in))
+		out = make([]float32, len(in))
 		max = slices.Max(in)
-		sum float64
+		sum float32
 	)
 
 	for i, val := range in {
-		expVal := math.Exp(val - max)
+		expVal := float32(math.Exp(float64(val - max)))
 		out[i] = expVal
 		sum += expVal
 	}
@@ -100,6 +84,6 @@ func (s SoftMax) Forward(in []float64) []float64 {
 
 // This simply returns slice of 1s because we have already incorporated
 // the derivative of softmax when we set dCdA in the Classify receiver.
-func (s SoftMax) Backward(in []float64) []float64 {
-	return slices.Repeat([]float64{1}, len(in))
+func (s SoftMax) Backward(in []float32) []float32 {
+	return slices.Repeat([]float32{1}, len(in))
 }
