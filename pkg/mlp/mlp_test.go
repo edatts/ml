@@ -3,7 +3,6 @@ package mlp_test
 import (
 	"archive/tar"
 	"compress/gzip"
-	"encoding/csv"
 	"fmt"
 	"io"
 	"log/slog"
@@ -53,257 +52,159 @@ func TestMLP(t *testing.T) {
 	// ctx, cancel := signal.NotifyContext(t.Context(), os.Interrupt, os.Kill)
 	// defer cancel()
 
-	go func() {
-		svr := &http.Server{
-			Addr: ":8000",
+	// // Server for serving charts...
+	// go func() {
+	// 	svr := &http.Server{
+	// 		Addr: ":8000",
+	// 	}
+
+	// 	http.Handle("GET /", http.HandlerFunc(httpHandler))
+	// 	if err := svr.ListenAndServe(); err != http.ErrServerClosed {
+	// 		panic(fmt.Sprintf("server err: %s", err.Error()))
+	// 	}
+	// }()
+
+	t.Run("spiral dataset", func(t *testing.T) {
+		var (
+			N = 100
+			K = 3
+			X = make([][]float32, N*K)
+			Y = make([][]int, N*K)
+		)
+
+		for i := range K {
+			r := linspace(0, 1, N)
+			t := linspaceRand(float64(4*i), float64(4*(i+1)), N, 0.2)
+			for j := range N {
+				dataPoint := []float32{float32(r[j] * math.Sin(t[j])), float32(r[j] * math.Cos(t[j]))}
+				X[i*100+j] = dataPoint
+				y := make([]int, K)
+				y[i] = 1
+				Y[i*100+j] = y
+			}
 		}
 
-		http.Handle("GET /", http.HandlerFunc(httpHandler))
-		if err := svr.ListenAndServe(); err != http.ErrServerClosed {
-			panic(fmt.Sprintf("server err: %s", err.Error()))
+		X_train, X_test, Y_train, Y_test := trainTestSplit(X, Y, 0.8)
+
+		trainDataProvider := func() ([][]float32, any, error) {
+			return X_train, Y_train, nil
 		}
-	}()
 
-	// t.Run("spiral dataset", func(t *testing.T) {
-	// 	var (
-	// 		N = 100
-	// 		K = 3
-	// 		X = make([][]float64, N*K)
-	// 		Y = make([][]int, N*K)
-	// 	)
+		testDataProvider := func() ([][]float32, any, error) {
+			return X_test, Y_test, nil
+		}
 
-	// 	for i := range K {
-	// 		r := linspace(0, 1, N)
-	// 		t := linspaceRand(float64(4*i), float64(4*(i+1)), N, 0.2)
-	// 		for j := range N {
-	// 			dataPoint := []float64{r[j] * math.Sin(t[j]), r[j] * math.Cos(t[j])}
-	// 			X[i*100+j] = dataPoint
-	// 			y := make([]int, K)
-	// 			y[i] = 1
-	// 			Y[i*100+j] = y
-	// 		}
-	// 	}
+		model, err := mlp.New(2, 3, 2, mlp.WithClassifcation())
+		require.NoError(t, err)
 
-	// 	scatter := charts.NewScatter()
-	// 	scatter.SetGlobalOptions(
-	// 		charts.WithTitleOpts(opts.Title{Title: "Spiral scatter"}),
-	// 		charts.WithGridOpts(opts.Grid{
-	// 			Show: opts.Bool(true),
-	// 		}),
-	// 		charts.WithXAxisOpts(opts.XAxis{
-	// 			Min: -1.1, Max: 1.1,
-	// 		}),
-	// 		charts.WithYAxisOpts(opts.YAxis{
-	// 			Min: -1.1, Max: 1.1,
-	// 		}),
-	// 	)
+		o := optimizer.New(
+			optimizer.WithClassification(),
+			optimizer.WithNumEpochs(50),
+			optimizer.WithBatchSize(16),
+			optimizer.WithLearningRate(0.05),
+			optimizer.WithLearningRateDecay(0.0025),
+			optimizer.WithTrainDataProvider(trainDataProvider),
+			optimizer.WithTestDataProvider(testDataProvider),
+			optimizer.WithSampler(optimizer.NewRS2Sampler[int](1)),
+		)
 
-	// 	data := []opts.ScatterData{}
-	// 	for i, x := range X {
-	// 		data = append(data, opts.ScatterData{
-	// 			Value:      x,
-	// 			SymbolSize: 7,
-	// 		})
-	// 		if (i+1)%100 == 0 {
-	// 			scatter.AddSeries(strconv.Itoa((i+1)/100), data)
-	// 			data = nil
-	// 		}
-	// 	}
+		require.NoError(t, o.Run(model))
 
-	// 	mu.Lock()
-	// 	allCarts = append(allCarts, scatter)
-	// 	mu.Unlock()
+		_, _, accuracy, regLoss, err := o.Classify(X_test, Y_test)
+		require.NoError(t, err)
 
-	// 	slog.Info("X", "X", X[:5])
-	// 	slog.Info("X", "X", X[100:105])
-	// 	slog.Info("X", "X", X[200:205])
+		slog.Info("loss", "loss", regLoss)
+		slog.Info("percentage accuracy", "accuracy", accuracy)
 
-	// 	slog.Info("Y", "Y", Y[:5])
-	// 	slog.Info("Y", "Y", Y[100:105])
-	// 	slog.Info("Y", "Y", Y[200:205])
+		require.Greater(t, accuracy, float64(90))
+	})
 
-	// 	model, err := mlp.New(2, 3, 2, mlp.WithClassifcation())
-	// 	require.NoError(t, err)
+	t.Run("sine wave", func(t *testing.T) {
+		var (
+			numDatapoints         = 5000
+			X, Y                  = make([][]float32, numDatapoints), make([][]float32, numDatapoints)
+			trainRatio    float64 = 0.80
+		)
 
-	// 	_, _, _, err = model.Classify(X, Y)
-	// 	require.NoError(t, err)
+		for i := range numDatapoints {
+			x := (rand.Float64() * 3.14159 * 2) - 3.14159
+			y := float32(math.Sin(x))
+			X[i], Y[i] = []float32{float32(x / 3.14159)}, []float32{y / 3.14159}
+		}
 
-	// 	var (
-	// 		numIterations         = 20000
-	// 		batchSize             = 1
-	// 		learningRate  float64 = 0.001
-	// 		lossSum       float64 = 0
-	// 		accSum        float64 = 0
-	// 	)
+		X_train, X_test, Y_train, Y_test := trainTestSplit(X, Y, trainRatio)
 
-	// 	X_train, X_test, Y_train, Y_test := trainTestSplit(X, Y, 0.8)
+		trainDataProvider := func() ([][]float32, any, error) {
+			return X_train, Y_train, nil
+		}
 
-	// 	for i := range numIterations {
-	// 		// slog.Info("new iteration")
-	// 		// Pick random data point
-	// 		// idx := rand.Intn(len(X))
-	// 		// input, target := X[idx], Y[idx]
+		testDataProvider := func() ([][]float32, any, error) {
+			return X_test, Y_test, nil
+		}
 
-	// 		var batchInput = make([][]float64, batchSize)
-	// 		var batchTarget = make([][]int, batchSize)
-	// 		for j := range batchSize {
-	// 			batchInput[j] = X_train[(j+(i*batchSize))%len(X_train)]
-	// 			batchTarget[j] = Y_train[(j+(i*batchSize))%len(Y_train)]
-	// 		}
+		model, err := mlp.New(1, 1, 2)
+		require.NoError(t, err)
 
-	// 		// slog.Info("data", "inputs", batchInput, "targets", batchTarget)
+		o := optimizer.New(
+			optimizer.WithNumEpochs(75),
+			optimizer.WithBatchSize(128),
+			optimizer.WithLearningRate(0.125),
+			optimizer.WithLearningRateDecay(0.00025),
+			optimizer.WithLoggingInterval(100),
+			optimizer.WithTrainDataProvider(trainDataProvider),
+			optimizer.WithTestDataProvider(testDataProvider),
+			optimizer.WithSampler(optimizer.NewConvenienceSampler[float32]()),
+		)
 
-	// 		// out, acc, loss, err := model.Classify([][]float64{input}, [][]int{target})
-	// 		_, acc, loss, err := model.Classify(batchInput, batchTarget)
-	// 		require.NoError(t, err)
+		require.NoError(t, o.Run(model))
 
-	// 		lossSum += loss
-	// 		accSum += acc
-	// 		if (i+1)%500 == 0 {
-	// 			learningRate *= 0.99
-	// 			slog.Info("training info", "iteration", i+1, "lr", learningRate, "loss", loss, "avgLoss", lossSum/float64(500), "avgAccuracy", accSum/float64(500))
+		outputs, _, mse, regLoss, err := o.Regress(X_test, Y_test)
+		require.NoError(t, err)
 
-	// 			// model.LogLossDeriv()
-	// 			require.NoError(t, model.Backward(learningRate))
-	// 			// model.LogWeights()
-	// 			// model.LogLogits()
-	// 			// model.LogGrads()
-	// 			// model.LogActivations()
-	// 			// slog.Info("targets", "targets", batchTarget)
-	// 			// slog.Info("outputs", "outputs", outputs)
-	// 			lossSum, accSum = 0, 0
-	// 			continue
-	// 		}
+		slog.Info("loss", "loss", regLoss)
+		slog.Info("Mean Squared Error", "MSE", mse)
 
-	// 		require.NoError(t, model.Backward(learningRate))
-	// 	}
+		var numCloseEnough int
+		for i, target := range Y_test {
+			//  require.True(t, withinExpectedRange(outputs[i][0], target[0], 0.05), "actual not within range, actual=%f, expected=%f, tolerancePercentage=%d", outputs[i][0], target[0], 5)
+			// slog.Info("results", "prediction", outputs[i][0], "target", target[0])
+			if withinExpectedRange(outputs[i][0], target[0], 0.01) {
+				numCloseEnough++
+			}
+		}
 
-	// 	_, accuracy, loss, err := model.Classify(X_test, Y_test)
-	// 	require.NoError(t, err)
+		percentageInRange := (float64(numCloseEnough) / float64(len(Y_test))) * 100
 
-	// 	slog.Info("loss", "loss", loss)
-	// 	slog.Info("percentage accuracy", "accuracy", accuracy)
+		slog.Info("len(Y_test)", "len", len(Y_test))
+		slog.Info("numCloseEnough", "num", numCloseEnough)
+		slog.Info("percentage of close enough answers", "percentage", percentageInRange)
+		require.Greater(t, percentageInRange, float64(90))
 
-	// 	require.Greater(t, accuracy, float64(90))
+		// sinePlot := charts.NewScatter()
+		// sinePlot.SetGlobalOptions(
+		// 	charts.WithTitleOpts(opts.Title{Title: "Sine actual"}),
+		// 	charts.WithGridOpts(opts.Grid{
+		// 		Show: opts.Bool(true),
+		// 	}),
+		// )
 
-	// })
+		// trainData := []opts.ScatterData{}
+		// // for i, x := range X_train {
+		// for i, x := range X_test {
+		// 	trainData = append(trainData, opts.ScatterData{
+		// 		// Value: []float32{x[0], Y_train[i][0]},
+		// 		Value:      []float32{x[0], outputs[i][0]},
+		// 		SymbolSize: 7,
+		// 	})
+		// }
 
-	// t.Run("sine wave", func(t *testing.T) {
-	// 	var (
-	// 		numDatapoints         = 1000
-	// 		numIterations         = 10000
-	// 		batchSize             = 64
-	// 		learningRate  float64 = 0.015
-	// 		X, Y                  = make([][]float64, numDatapoints), make([][]float64, numDatapoints)
-	// 		trainRatio    float64 = 0.85
-	// 		sumLoss       float64 = 0
-	// 		sumMSE        float64 = 0
-	// 	)
+		// sinePlot.AddSeries("Predicted", trainData)
 
-	// 	for i := range numDatapoints {
-	// 		x := rand.Float64() * 3.14159 * 2
-	// 		y := math.Sin(x)
-	// 		X[i], Y[i] = []float64{x}, []float64{y}
-	// 	}
+		// mu.Lock()
+		// allCarts = append(allCarts, sinePlot)
+		// mu.Unlock()
 
-	// 	X_train, X_test, Y_train, Y_test := trainTestSplit(X, Y, trainRatio)
-
-	// 	// sinePlot := charts.NewScatter()
-	// 	// sinePlot.SetGlobalOptions(
-	// 	// 	charts.WithTitleOpts(opts.Title{Title: "Sine actual"}),
-	// 	// 	charts.WithGridOpts(opts.Grid{
-	// 	// 		Show: opts.Bool(true),
-	// 	// 	}),
-	// 	// )
-
-	// 	// trainData := []opts.ScatterData{}
-	// 	// for i, x := range X_train {
-	// 	// 	trainData = append(trainData, opts.ScatterData{
-	// 	// 		Value:      []float64{x[0], Y_train[i][0]},
-	// 	// 		SymbolSize: 7,
-	// 	// 	})
-	// 	// }
-
-	// 	// sinePlot.AddSeries("Predicted", trainData)
-
-	// 	// mu.Lock()
-	// 	// allCarts = append(allCarts, sinePlot)
-	// 	// mu.Unlock()
-
-	// 	// slog.Info("ready to render page.. ")
-
-	// 	model, err := mlp.New(1, 1, 2)
-	// 	require.NoError(t, err)
-
-	// 	for i := range numIterations {
-	// 		var batchInput = make([][]float64, batchSize)
-	// 		var batchTarget = make([][]float64, batchSize)
-	// 		for j := range batchSize {
-	// 			batchInput[j] = X_train[(j+(i*batchSize))%len(X_train)]
-	// 			batchTarget[j] = Y_train[(j+(i*batchSize))%len(Y_train)]
-	// 		}
-
-	// 		outputs, mse, loss, err := model.Regress(batchInput, batchTarget)
-	// 		require.NoError(t, err)
-	// 		sumLoss += loss
-	// 		sumMSE += mse
-
-	// 		if (i+1)%500 == 0 {
-	// 			slog.Info("training info", "iteration", i+1, "lr", learningRate, "avgLoss", sumLoss/float64(1000), "avgMSE", sumMSE/float64(1000), "pred_0", outputs[0], "target_0", batchTarget[0])
-	// 			sumLoss, sumMSE = 0, 0
-	// 			learningRate *= 0.98
-	// 			require.NoError(t, model.Backward(learningRate))
-	// 			// model.LogGrads()
-	// 			// model.LogLossDeriv()
-	// 			// model.LogWeights()
-	// 			// model.LogBiases()
-	// 			continue
-	// 		}
-
-	// 		require.NoError(t, model.Backward(learningRate))
-	// 	}
-
-	// 	outputs, mse, loss, err := model.Regress(X_test, Y_test)
-	// 	require.NoError(t, err)
-
-	// 	slog.Info("loss", "loss", loss)
-	// 	slog.Info("Mean Squared Error", "MSE", mse)
-
-	// 	var numCloseEnough int
-	// 	for i, target := range Y_test {
-	// 		//  require.True(t, withinExpectedRange(outputs[i][0], target[0], 0.05), "actual not within range, actual=%f, expected=%f, tolerancePercentage=%d", outputs[i][0], target[0], 5)
-	// 		if withinExpectedRange(outputs[i][0], target[0], 0.01) {
-	// 			numCloseEnough++
-	// 		}
-	// 	}
-
-	// 	slog.Info("len(Y_test)", "len", len(Y_test))
-	// 	slog.Info("numCloseEnough", "num", numCloseEnough)
-	// 	slog.Info("percentage of close enough answers", "percentage", (float64(numCloseEnough)/float64(len(Y_test)))*100)
-
-	// 	scatter := charts.NewScatter()
-	// 	scatter.SetGlobalOptions(
-	// 		charts.WithTitleOpts(opts.Title{Title: "Sine predictions"}),
-	// 		charts.WithGridOpts(opts.Grid{
-	// 			Show: opts.Bool(true),
-	// 		}),
-	// 	)
-
-	// 	data := []opts.ScatterData{}
-	// 	for i, x := range X_test {
-	// 		data = append(data, opts.ScatterData{
-	// 			Value:      []float64{x[0], outputs[i][0]},
-	// 			SymbolSize: 7,
-	// 		})
-	// 	}
-
-	// 	scatter.AddSeries("Predicted", data)
-
-	// 	mu.Lock()
-	// 	allCarts = append(allCarts, scatter)
-	// 	mu.Unlock()
-
-	// })
+	})
 
 	t.Run("mnist handwritten digits", func(t *testing.T) {
 		slog.Info("preparing mnist data")
@@ -323,12 +224,11 @@ func TestMLP(t *testing.T) {
 
 		o := optimizer.New(
 			optimizer.WithClassification(),
-			optimizer.WithNumEpochs(12),
+			optimizer.WithNumEpochs(5),
 			optimizer.WithBatchSize(126),
 			optimizer.WithLearningRate(0.05),
 			optimizer.WithLearningRateDecay(0.001),
 			optimizer.WithSampler(optimizer.NewRS2Sampler[int](0.20)),
-			// optimizer.WithSampler(optimizer.NewConvenienceSampler[int]()),
 			optimizer.WithTrainDataProvider(func() ([][]float32, any, error) { return X_train, Y_train, nil }),
 			optimizer.WithTestDataProvider(func() ([][]float32, any, error) { return X_test, Y_test, nil }),
 		)
@@ -336,37 +236,6 @@ func TestMLP(t *testing.T) {
 		slog.Info("starting model training...")
 
 		require.NoError(t, o.Run(model))
-
-		// var (
-		// 	numEpochs    = 5
-		// 	batchSize    = 64
-		// 	learningRate = 0.05
-		// )
-
-		// for epoch := 1; epoch <= numEpochs; epoch++ {
-		// 	var accSum, lossSum float64
-		// 	var numBatches int
-		// 	for _, batch := range selectBatches(batchSize, X_train, Y_train, 0.20) {
-		// 		_, acc, loss, err := model.Classify(batch.Inputs, batch.Targets)
-		// 		require.NoError(t, err)
-		// 		accSum += acc
-		// 		lossSum += loss
-		// 		numBatches++
-
-		// 		if numBatches%20 == 0 {
-		// 			slog.Info("training info", "epoch", epoch, "lr", learningRate, "loss", lossSum/float64(20), "accuracy", accSum/float64(20))
-		// 			accSum, lossSum = 0, 0
-		// 		}
-
-		// 		require.NoError(t, model.Backward(learningRate))
-		// 		learningRate *= 0.99925
-		// 	}
-		// }
-
-		// _, acc, loss, err := model.Classify(X_test, Y_test)
-		// require.NoError(t, err)
-
-		// slog.Info("testing info", "loss", loss, "accuracy", acc)
 
 	})
 
@@ -471,32 +340,6 @@ func loadMNISTData(t *testing.T) ([][]int, [][]int, [][]int, [][]int) {
 	return out["train-images"].GetInt(), out["train-labels"].GetInt(), out["t10k-images"].GetInt(), out["t10k-labels"].GetInt()
 }
 
-func loadMNISTDataFromCsv(t *testing.T) ([][]string, [][]string, [][]string, [][]string) {
-	files := []string{
-		"test/datasets/mnist/train-images.csv",
-		"test/datasets/mnist/train-labels.csv",
-		"test/datasets/mnist/t10k-images.csv",
-		"test/datasets/mnist/t10k-labels.csv",
-	}
-
-	fileContents := make([][][]string, 4)
-	for i, file := range files {
-		f, err := os.Open(file)
-		require.NoError(t, err)
-		defer f.Close()
-
-		// Discard header
-		cr := csv.NewReader(f)
-		_, err = cr.Read()
-		require.NoError(t, err)
-
-		fileContents[i], err = cr.ReadAll()
-		require.NoError(t, err)
-	}
-
-	return fileContents[0], fileContents[1], fileContents[2], fileContents[3]
-}
-
 func formatMNISTData(t *testing.T, train, test [][]int, Y_train, Y_test [][]int) ([][]float32, [][]float32) {
 	// Scale image data
 	var X_train = make([][]float32, len(train))
@@ -583,7 +426,7 @@ func trainTestSplit[XT, YT any](X []XT, Y []YT, trainRatio float64) ([]XT, []XT,
 	return X_train, X_test, Y_train, Y_test
 }
 
-func withinExpectedRange(value, expected, absRange float64) bool {
+func withinExpectedRange(value, expected, absRange float32) bool {
 	return value >= expected-absRange && value <= expected+absRange
 }
 

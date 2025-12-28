@@ -2,7 +2,6 @@ package mlp
 
 import (
 	"fmt"
-	"log/slog"
 	"math"
 	"math/rand/v2"
 
@@ -130,7 +129,7 @@ func (m *MLP) newLayer(lType LayerType, n int, prev Layer, lambda float64) Layer
 	}
 
 	// In case of classification we embed the final layer to overwrite it's
-	// Activations() receiver to apply the Softmax activation function.
+	// activations() receiver to apply the Softmax activation function.
 	if lType == Output && m.classification {
 		out := &output{
 			layer: l,
@@ -173,7 +172,7 @@ func (l *layer) init(batchSize int) {
 		l.dCdz, l.dCdA = initGradients(batchSize, l.width())
 	}
 
-	// Do we need to zero these every time?
+	// // Do we need to zero these every time?
 	// l.logits, l.acts = initActivations(batchSize, l.width())
 	// // Zero grads
 	// l.dCdz, l.dCdA = initGradients(batchSize, l.width())
@@ -393,7 +392,6 @@ func (l *layer) update(lr float64) {
 // }
 
 func initWeights(act ActivationFunc, prevWidth, width int) (*mat.Matrix, *mat.Matrix) {
-	slog.Info("initializing weights", "prevWidth", prevWidth, "width", width)
 	var (
 		// weights = make([][]float64, prevWidth)
 		// dCdW    = make([][]float64, prevWidth)
@@ -413,10 +411,10 @@ func initWeights(act ActivationFunc, prevWidth, width int) (*mat.Matrix, *mat.Ma
 			case ReLU:
 				// Kaiming He intialization: W ~ N(0, sqrt(2/n_inputs))
 				// weights[i][j] = rand.NormFloat64() * math.Sqrt(float64(2)/float64(prevWidth))
-				weights.Row(i)[j] = float32(rand.NormFloat64() * math.Sqrt(float64(2)/float64(prevWidth)))
+				weights.Row(i)[j] = float32(rand.NormFloat64() * math.Sqrt(float64(2)/float64(max(prevWidth, 10))))
 			default:
-				// weights[i][j] = rand.Float64()*0.1 - 0.05
-				weights.Row(i)[j] = float32(rand.NormFloat64() * 0.1)
+				// weights.Row(i)[j] = float32(rand.NormFloat64() * 0.1)
+				weights.Row(i)[j] = float32(rand.NormFloat64() * math.Sqrt(float64(2)/float64(max(prevWidth, 10))))
 			}
 		}
 	}

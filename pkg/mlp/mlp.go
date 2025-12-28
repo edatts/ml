@@ -13,8 +13,6 @@ import (
 // part of this refactor *MLP should satisfy the model.Model interface.
 var _ model.Model = &MLP{}
 
-// TODO: Update MLP to use *mat.Matrix.
-
 type MLP struct {
 	lambda float64 // Regularization factor
 

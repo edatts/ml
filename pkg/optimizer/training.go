@@ -48,7 +48,7 @@ func (c *ClassificationRun) Step() error {
 	}
 
 	if c.sampler == nil {
-		return fmt.Errorf("classificaiton run: %w", ErrNoSampler)
+		return fmt.Errorf("classification run: %w", ErrNoSampler)
 	}
 
 	batch, err := c.sampler.Batch()
@@ -164,7 +164,7 @@ func (r *RegressionRun) LogValue() slog.Value {
 		slog.Any("batchNum", r.numBatches),
 		slog.Any("lr", r.currentLearningRate),
 		// slog.Any("lastLoss", r.lastLoss),
-		slog.Any("epochAccuracy", r.lossSum/float64(r.epochBatches)),
+		slog.Any("epochLoss", r.lossSum/float64(r.epochBatches)),
 		// slog.Any("lastRegLoss", r.lastRegLoss),
 		slog.Any("epochRegLoss", r.regLossSum/float64(r.epochBatches)),
 	)
