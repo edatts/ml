@@ -72,7 +72,7 @@ func (c *ClassificationRun) Step() error {
 	}
 
 	// Backpropagate
-	if err := c.optimizer.model.Backward(dCdA, c.currentLearningRate); err != nil {
+	if err := c.optimizer.model.Backward(dCdA, c.currentLearningRate, c.optimizer.cfg.lambda); err != nil {
 		return fmt.Errorf("failed backpropagating: %w", err)
 	}
 
@@ -148,7 +148,7 @@ func (r *RegressionRun) Step() error {
 	}
 
 	// Backpropagate
-	if err := r.optimizer.model.Backward(dCdA, r.currentLearningRate); err != nil {
+	if err := r.optimizer.model.Backward(dCdA, r.currentLearningRate, r.optimizer.cfg.lambda); err != nil {
 		return fmt.Errorf("failed backpropagating: %w", err)
 	}
 

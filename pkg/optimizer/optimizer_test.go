@@ -86,7 +86,7 @@ func (m *mockModel) Forward(inputs [][]float32) ([][]float32, error) {
 	return out, nil
 }
 
-func (m *mockModel) Backward(ouputs [][]float32, lr float64) error {
+func (m *mockModel) Backward(_ [][]float32, _, _ float64) error {
 	return nil
 }
 
