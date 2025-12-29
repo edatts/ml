@@ -94,15 +94,19 @@ func TestMLP(t *testing.T) {
 			return X_test, Y_test, nil
 		}
 
-		model, err := mlp.New(2, 3, 2, mlp.WithClassifcation())
+		model, err := mlp.New(
+			2, 3, mlp.WithClassifcation(),
+			mlp.WithHiddenLayers(32, 64, 64),
+		)
 		require.NoError(t, err)
 
 		o := optimizer.New(
 			optimizer.WithClassification(),
 			optimizer.WithNumEpochs(50),
 			optimizer.WithBatchSize(16),
-			optimizer.WithLearningRate(0.075),
+			optimizer.WithLearningRate(0.1),
 			optimizer.WithLearningRateDecay(0.0025),
+			optimizer.WithLoggingInterval(100),
 			optimizer.WithTrainDataProvider(trainDataProvider),
 			optimizer.WithTestDataProvider(testDataProvider),
 			optimizer.WithSampler(optimizer.NewRS2Sampler[int](1)),
@@ -142,15 +146,18 @@ func TestMLP(t *testing.T) {
 			return X_test, Y_test, nil
 		}
 
-		model, err := mlp.New(1, 1, 2)
+		model, err := mlp.New(
+			1, 1,
+			mlp.WithHiddenLayers(64, 128, 64),
+		)
 		require.NoError(t, err)
 
 		o := optimizer.New(
-			optimizer.WithNumEpochs(40),
+			optimizer.WithNumEpochs(50),
 			optimizer.WithBatchSize(32),
 			optimizer.WithLearningRate(0.2),
 			optimizer.WithLearningRateDecay(0.0002),
-			optimizer.WithLoggingInterval(100),
+			optimizer.WithLoggingInterval(200),
 			optimizer.WithTrainDataProvider(trainDataProvider),
 			optimizer.WithTestDataProvider(testDataProvider),
 			optimizer.WithSampler(optimizer.NewConvenienceSampler[float32]()),
@@ -219,16 +226,20 @@ func TestMLP(t *testing.T) {
 
 		slog.Info("finished formatting data")
 
-		model, err := mlp.New(784, 10, 3, mlp.WithClassifcation())
+		model, err := mlp.New(
+			784, 10,
+			mlp.WithClassifcation(),
+			mlp.WithHiddenLayers(512, 384, 256),
+		)
 		require.NoError(t, err)
 
 		o := optimizer.New(
 			optimizer.WithClassification(),
-			optimizer.WithNumEpochs(5),
-			optimizer.WithBatchSize(126),
-			optimizer.WithLearningRate(0.05),
-			optimizer.WithLearningRateDecay(0.001),
-			optimizer.WithSampler(optimizer.NewRS2Sampler[int](0.20)),
+			optimizer.WithNumEpochs(10),
+			optimizer.WithBatchSize(128),
+			optimizer.WithLearningRate(0.075),
+			optimizer.WithLearningRateDecay(0.0025),
+			optimizer.WithSampler(optimizer.NewRS2Sampler[int](0.10)),
 			optimizer.WithTrainDataProvider(func() ([][]float32, any, error) { return X_train, Y_train, nil }),
 			optimizer.WithTestDataProvider(func() ([][]float32, any, error) { return X_test, Y_test, nil }),
 		)

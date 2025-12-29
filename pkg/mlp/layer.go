@@ -14,7 +14,7 @@ type Layer interface {
 	width() int
 	activations() *mat.Matrix
 	grads() *mat.Matrix
-	update(lr float64)
+	update(lr, lambda float64)
 	init(batchSize int)
 	sumSquaredWeights() float64
 }
@@ -57,7 +57,7 @@ func (i *input) grads() *mat.Matrix {
 	return &mat.Matrix{}
 }
 
-func (i *input) update(_ float64) {}
+func (i *input) update(_, _ float64) {}
 
 func (i *input) init(batchSize int) {
 	i.acts = mat.New(batchSize, i.size)
@@ -70,7 +70,6 @@ func (i *input) sumSquaredWeights() float64 {
 type layer struct {
 	prev        Layer
 	actFn       ActivationFunc
-	lambda      float64 // regularization factor for updating weigts
 	initialized bool
 	batchSize   int
 	size        int
@@ -114,7 +113,7 @@ func (o *output) activations() *mat.Matrix {
 	return o.acts
 }
 
-func (m *MLP) newLayer(lType LayerType, n int, prev Layer, lambda float64) Layer {
+func (m *MLP) newLayer(lType LayerType, n int, prev Layer) Layer {
 	if lType == Input {
 		return &input{
 			size: n,
@@ -122,10 +121,9 @@ func (m *MLP) newLayer(lType LayerType, n int, prev Layer, lambda float64) Layer
 	}
 
 	l := &layer{
-		prev:   prev,
-		actFn:  m.getActivationFunc(lType),
-		lambda: lambda,
-		size:   n,
+		prev:  prev,
+		actFn: m.getActivationFunc(lType),
+		size:  n,
 	}
 
 	// In case of classification we embed the final layer to overwrite it's
@@ -183,26 +181,12 @@ func (l *layer) init(batchSize int) {
 func (l *layer) Forward() error {
 	// Forward required us to, for each neuron, take the activations of
 	// the previous layer, multiply them by the weights, then add the bias.
-	// In our activaitons matrix each neuron is indexed by row and each
+	// In our activations matrix each neuron is indexed by row and each
 	// batch sample is indexed by column. In our weights matrix each neuron
 	// in the current layer is indexed by row and connection (weight) to a
 	// previous layer's neuron is indexed by column.
 
 	// z = actFn(dot(A,W) + b)
-	// product, err := mat.MulConcurrent(l.prev.activations, l.weights)
-	// product, err := mat.MulUnrollConcurrent(l.prev.activations, l.weights)
-	// if err != nil {
-	// 	panic(fmt.Sprintf("forward: %s", err))
-	// }
-
-	// l.logits, err = mat.AddMatVecRows(product, l.biases)
-	// if err != nil {
-	// 	panic(fmt.Sprintf("forward: %s", err))
-	// }
-
-	// l.activations = mat.ApplyActivation(l.logits, l.actFn.Forward)
-
-	// ------ New ------ //
 
 	if err := l.logits.Mul(l.prev.activations(), l.weights); err != nil {
 		return fmt.Errorf("failed multiplying activations and weights: %w", err)
@@ -227,26 +211,15 @@ func (l *layer) Backward() error {
 	// slog.Info("grads", "grads", l.dCdA.Row(0)[0:10])
 
 	// dCdz = actFn'(z) * dC/dA
-	// actPrime := mat.ApplyActivation(l.logits, l.actFn.Backward)
-	// l.dCdz = mat.Hadamard(actPrime, l.dCdA)
 	actPrime := l.logits.ApplyActivation(l.actFn.Backward)
 	if err := l.dCdz.Hadamard(actPrime, l.dCdA); err != nil {
 		return fmt.Errorf("failed hadamard: %w", err)
 	}
 
 	// dCdB = sum(1 * dC/dz)/batchSize
-	// l.dCdB = mat.AvgCols(l.dCdz)
 	l.dCdB = l.dCdz.AvgCols()
 
 	// dCdW = sum(prevA * dC/dz)/batchSize
-	// var err error
-	// // l.dCdW, err = mat.MulConcurrent(mat.Transpose(l.prev.activations), l.dCdz)
-	// l.dCdW, err = mat.MulUnrollConcurrent(mat.Transpose(l.prev.activations), l.dCdz)
-	// if err != nil {
-	// 	panic(fmt.Sprintf("backward: %s", err))
-	// }
-	// l.dCdW = mat.MulScalar(l.dCdW, float64(1)/float64(l.batchSize))
-
 	if err := l.dCdW.Mul(l.prev.activations().Traspose(), l.dCdz); err != nil {
 		return fmt.Errorf("failed multiplying acts transpose with logit grads: %w", err)
 	}
@@ -255,14 +228,7 @@ func (l *layer) Backward() error {
 	l.dCdW = l.dCdW.ApplyActivation(func(in float32) float32 { return in / float32(l.batchSize) })
 
 	// dCdA_(L-1) = W * dCdz
-	// l.prev.dCdA, err = mat.MulConcurrent(l.dCdz, mat.Transpose(l.weights))
-	// l.prev.dCdA, err = mat.MulUnrollConcurrent(l.dCdz, mat.Transpose(l.weights))
-	// if err != nil {
-	// 	panic(fmt.Sprintf("backward: %s", err))
-	// }
-
-	// Exclude input layer
-	if l.prev.grads() != nil && l.prev.grads().Data() != nil {
+	if l.prev.grads() != nil && l.prev.grads().Data() != nil { // Exclude input layer
 		if err := l.prev.grads().Mul(l.dCdz, l.weights.Traspose()); err != nil {
 			return fmt.Errorf("failed multiplying logit grads with weights transpose: %w", err)
 		}
@@ -271,22 +237,11 @@ func (l *layer) Backward() error {
 	return nil
 }
 
-func (l *layer) update(lr float64) {
-	// l.biases = mat.AddVec(l.biases, mat.MulVecScalar(l.dCdB, -lr))
-
-	// l.weights = mat.Add(l.weights, mat.MulScalar(l.weights, l.lambda))
-	// l.weights = mat.Add(l.weights, mat.MulScalar(l.dCdW, -lr))
-
+func (l *layer) update(lr, lambda float64) {
 	// Regularize and update
-	// for i := range len(l.weights) {
-	// 	for j := range len(l.weights[0]) {
-	// 		l.weights[i][j] -= lr * (l.dCdW[i][j] + (l.lambda * l.weights[i][j]))
-	// 	}
-	// }
-
 	for i := range l.weights.NumRows() {
 		for j, w := range l.weights.Row(i) {
-			l.weights.Row(i)[j] -= float32(lr) * (l.dCdW.Row(i)[j] + (float32(l.lambda) * w))
+			l.weights.Row(i)[j] -= float32(lr) * (l.dCdW.Row(i)[j] + (float32(lambda) * w))
 		}
 	}
 
@@ -296,124 +251,27 @@ func (l *layer) update(lr float64) {
 
 }
 
-// dz/dW = prevA
-//
-// dA/dz = derivActiv(z)
-//
-// dC/dA = 2(y_bar - y) for MSE
-//
-// dz/dprevA = W
-//
-// Weight
-// dC/dW = dz/dW * dA/dz * dC/dA = prevA * derivActiv(z) * 2(y_bar - y)
-//
-// Bias
-// dC/dB = dz/dB * dA/dz * dC/dA = 1 * derivActiv(z) * 2(y_bar - y)
-//
-// Prev A
-// dC/dprevA = dz/dprevA * dA/dz * dC/dA
-// 			 = W * derivActiv(z) * 2(y_bar - y)
-//
-// Prev weight
-// dC/dprevW = dprevz/dprevW * dprevA/dprevz 	 * dC/dprevA
-//			 = dprevz/dprevW * dprevA/dprevz 	 * dz/dprevA * dA/dz * dC/dA
-// 			 = prevprevA 	 * derivActiv(prevz) * W * derivActiv(z) * 2(y_bar - y)
-//
-// Prev Bias
-// dC/dprevB = dprevZ/dprevB * dprevA/dprevz 	 * dz/dprevA * dA/dz 		 * dC/dA
-// 			 = 1 			 * derivActiv(prevz) * W 		 * derivActiv(z) * 2(y_bar - y)
-//
-// Prev prev A
-// dC/dprevprevA = dprevz/dprevprevA * dprevA/dprevz  	  * dC/dprevA
-//				 = prevW			 * derivActive(prevz) * W * derivActiv(z) * 2(y_bar - y)
-
-// type Layer struct {
-// 	prev    *Layer
-// 	lType   LayerType
-// 	Neurons []*Neuron
-// }
-
-// // func newLayer(lType LayerType, n int16, prev *Layer, lambda float64) *Layer {
-// // 	return &Layer{
-// // 		prev:    prev,
-// // 		lType:   lType,
-// // 		Neurons: newNeurons(n, prev, lType, lambda),
-// // 	}
-// // }
-
-// func (l *Layer) Forward(newBatch bool, batchLen int) {
-// 	for _, neuron := range l.Neurons {
-// 		neuron.Forward(newBatch, batchLen)
-// 	}
-// }
-
-// func (l *Layer) Backward() {
-// 	for _, neuron := range l.Neurons {
-// 		neuron.Backward()
-// 	}
-// }
-
-// func (l *Layer) Update(lr float64) {
-// 	for _, neuron := range l.Neurons {
-// 		neuron.Update(lr)
-// 	}
-// }
-
-// func (l layer) logWweights() {
-// 	slog.Info("weights", "weights", l.weights[:1])
-// }
-
-// func (l *layer) logBiases() {
-// 	slog.Info("biases", "biases", l.biases[:1])
-// }
-
-// func (l *layer) logGrads() {
-// 	slog.Info("grads", "grads", l.dCdz)
-// }
-
-// func (l *Layer) logActivations() {
-// 	var a []float64
-// 	for _, neuron := range l.Neurons {
-// 		a = append(a, neuron.acts...)
-// 	}
-// 	slog.Info("activations", "acts", a)
-// }
-
-// func (l *layer) logLossDeriv() {
-// 	slog.Info("Loss deriv", "dCdA", l.dCdA)
-// }
-
-// func (l *Layer) logLogits() {
-// 	var logits []float64
-// 	for _, neuron := range l.Neurons {
-// 		logits = append(logits, neuron.logits...)
-// 	}
-// 	slog.Info("Logits", "logits", logits)
-// }
-
 func initWeights(act ActivationFunc, prevWidth, width int) (*mat.Matrix, *mat.Matrix) {
 	var (
-		// weights = make([][]float64, prevWidth)
-		// dCdW    = make([][]float64, prevWidth)
 		weights = mat.New(prevWidth, width)
 		dCdW    = mat.New(prevWidth, width)
 	)
 
 	for i := range int(prevWidth) {
-		// weights[i] = make([]float64, width)
-		// dCdW[i] = make([]float64, width)
 		for j := range width {
 			switch act.(type) {
 			case Sigmoid:
 				// Xavier Normal initialization: W ~ N(0, sqrt(2/n_in + n_out))
-				// weights[i][j] = rand.NormFloat64() * math.Sqrt(float64(2)/float64(prevWidth+width))
 				weights.Row(i)[j] = float32(rand.NormFloat64() * math.Sqrt(float64(2)/float64(prevWidth+width)))
 			case ReLU:
 				// Kaiming He intialization: W ~ N(0, sqrt(2/n_inputs))
-				// weights[i][j] = rand.NormFloat64() * math.Sqrt(float64(2)/float64(prevWidth))
+
+				// Here we modify the n_inputs term to be max(n_inputs, 10), this is to
+				// prevent exploding gradients when the number of input features is very
+				// small. This was observed with n_inputs = 1 when testing regression.
 				weights.Row(i)[j] = float32(rand.NormFloat64() * math.Sqrt(float64(2)/float64(max(prevWidth, 10))))
 			default:
-				// weights.Row(i)[j] = float32(rand.NormFloat64() * 0.1)
+				// Kaiming He intialization: W ~ N(0, sqrt(2/n_inputs))
 				weights.Row(i)[j] = float32(rand.NormFloat64() * math.Sqrt(float64(2)/float64(max(prevWidth, 10))))
 			}
 		}
@@ -464,3 +322,34 @@ func (l *layer) sumSquaredWeights() float64 {
 	}
 	return sum
 }
+
+// dz/dW = prevA
+//
+// dA/dz = derivActiv(z)
+//
+// dC/dA = 2(y_bar - y) for MSE
+//
+// dz/dprevA = W
+//
+// Weight
+// dC/dW = dz/dW * dA/dz * dC/dA = prevA * derivActiv(z) * 2(y_bar - y)
+//
+// Bias
+// dC/dB = dz/dB * dA/dz * dC/dA = 1 * derivActiv(z) * 2(y_bar - y)
+//
+// Prev A
+// dC/dprevA = dz/dprevA * dA/dz * dC/dA
+// 			 = W * derivActiv(z) * 2(y_bar - y)
+//
+// Prev weight
+// dC/dprevW = dprevz/dprevW * dprevA/dprevz 	 * dC/dprevA
+//			 = dprevz/dprevW * dprevA/dprevz 	 * dz/dprevA * dA/dz * dC/dA
+// 			 = prevprevA 	 * derivActiv(prevz) * W * derivActiv(z) * 2(y_bar - y)
+//
+// Prev Bias
+// dC/dprevB = dprevZ/dprevB * dprevA/dprevz 	 * dz/dprevA * dA/dz 		 * dC/dA
+// 			 = 1 			 * derivActiv(prevz) * W 		 * derivActiv(z) * 2(y_bar - y)
+//
+// Prev prev A
+// dC/dprevprevA = dprevz/dprevprevA * dprevA/dprevz  	  * dC/dprevA
+//				 = prevW			 * derivActive(prevz) * W * derivActiv(z) * 2(y_bar - y)
