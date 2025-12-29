@@ -101,7 +101,7 @@ func TestMLP(t *testing.T) {
 			optimizer.WithClassification(),
 			optimizer.WithNumEpochs(50),
 			optimizer.WithBatchSize(16),
-			optimizer.WithLearningRate(0.05),
+			optimizer.WithLearningRate(0.075),
 			optimizer.WithLearningRateDecay(0.0025),
 			optimizer.WithTrainDataProvider(trainDataProvider),
 			optimizer.WithTestDataProvider(testDataProvider),
@@ -146,10 +146,10 @@ func TestMLP(t *testing.T) {
 		require.NoError(t, err)
 
 		o := optimizer.New(
-			optimizer.WithNumEpochs(75),
-			optimizer.WithBatchSize(128),
-			optimizer.WithLearningRate(0.125),
-			optimizer.WithLearningRateDecay(0.00025),
+			optimizer.WithNumEpochs(40),
+			optimizer.WithBatchSize(32),
+			optimizer.WithLearningRate(0.2),
+			optimizer.WithLearningRateDecay(0.0002),
 			optimizer.WithLoggingInterval(100),
 			optimizer.WithTrainDataProvider(trainDataProvider),
 			optimizer.WithTestDataProvider(testDataProvider),
