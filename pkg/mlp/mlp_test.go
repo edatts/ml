@@ -1,21 +1,16 @@
 package mlp_test
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"fmt"
-	"io"
 	"log/slog"
 	"math"
 	"math/rand"
 	"net/http"
-	"os"
-	"strings"
 	"sync"
 	"testing"
 
-	"github.com/edatts/ml/pkg/idx"
 	"github.com/edatts/ml/pkg/mlp"
+	"github.com/edatts/ml/pkg/mnist"
 	"github.com/edatts/ml/pkg/optimizer"
 	"github.com/go-echarts/go-echarts/v2/components"
 	"github.com/stretchr/testify/require"
@@ -216,15 +211,11 @@ func TestMLP(t *testing.T) {
 	t.Run("mnist handwritten digits", func(t *testing.T) {
 		slog.Info("preparing mnist data")
 
-		train, Y_train, test, Y_test := loadMNISTData(t)
+		// The input data is scaled and the targets are one-hot encoded.
+		X_train, Y_train, X_test, Y_test, err := mnist.LoadData()
+		require.NoError(t, err)
 
 		slog.Info("loaded mnist data")
-
-		// This func scales the inputs data between 0 and 1 and
-		// one-hot encodes the targets.
-		X_train, X_test := formatMNISTData(t, train, test, Y_train, Y_test)
-
-		slog.Info("finished formatting data")
 
 		model, err := mlp.New(
 			784, 10,
@@ -307,84 +298,6 @@ func TestSelectBatches(t *testing.T) {
 	require.Len(t, batches[0].Targets, 5)
 	require.Len(t, batches[1].Inputs, 3)
 	require.Len(t, batches[1].Targets, 3)
-}
-
-func loadMNISTData(t *testing.T) ([][]int, [][]int, [][]int, [][]int) {
-	var (
-		tarFile = "test/datasets/mnist/mnist.tar.gz"
-		out     = map[string]idx.Data{}
-	)
-
-	f, err := os.Open(tarFile)
-	require.NoError(t, err)
-	defer f.Close()
-
-	gr, err := gzip.NewReader(f)
-	require.NoError(t, err)
-
-	tr := tar.NewReader(gr)
-
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		require.NoError(t, err)
-
-		slog.Info("reading file", "name", hdr.FileInfo().Name())
-		// slog.Info("file size", "size", hdr.FileInfo().Size())
-		slog.Info("file size", "size", hdr.Size)
-
-		// var b = []byte{0}
-		// for i := range 47040016 {
-		// 	if n, err := tr.Read(b); err != nil {
-		// 		slog.Error("failed reading", "error", err, "i", i, "n", n)
-		// 		panic(err)
-		// 	}
-		// }
-
-		name := strings.Split(hdr.Name, ".")[0]
-		out[name], err = idx.ParseIdxFile(tr)
-		require.NoError(t, err)
-	}
-
-	return out["train-images"].GetInt(), out["train-labels"].GetInt(), out["t10k-images"].GetInt(), out["t10k-labels"].GetInt()
-}
-
-func formatMNISTData(t *testing.T, train, test [][]int, Y_train, Y_test [][]int) ([][]float32, [][]float32) {
-	// Scale image data
-	var X_train = make([][]float32, len(train))
-	for i, sample := range train {
-		var scaled = make([]float32, len(sample))
-		for j, num := range sample {
-			scaled[j] = float32(num) / 255
-		}
-		X_train[i] = scaled
-	}
-
-	var X_test = make([][]float32, len(test))
-	for i, sample := range test {
-		var scaled = make([]float32, len(sample))
-		for j, num := range sample {
-			scaled[j] = float32(num) / 255
-		}
-		X_test[i] = scaled
-	}
-
-	// Convert labels to 1 hot encodings
-	for i, sample := range Y_train {
-		var row = make([]int, 10)
-		row[sample[0]] = 1
-		Y_train[i] = row
-	}
-
-	for i, sample := range Y_test {
-		var row = make([]int, 10)
-		row[sample[0]] = 1
-		Y_test[i] = row
-	}
-
-	return X_train, X_test
 }
 
 func linspace(start, end float64, n int) []float64 {

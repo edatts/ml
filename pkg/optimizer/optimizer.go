@@ -172,9 +172,9 @@ func (o *optimizer) Classify(inputs [][]float32, targets [][]int) ([][]float32, 
 		}
 	}
 
-	regLoss := 0.5 * o.cfg.lambda * o.model.SumSquaredWeights()
+	l2Reg := 0.5 * o.cfg.lambda * o.model.SumSquaredWeights()
 
-	return outputs, dCdA, Accuracy(outputs, targets), loss + regLoss, nil
+	return outputs, dCdA, Accuracy(outputs, targets), loss + l2Reg, nil
 }
 
 func (o *optimizer) Regress(inputs [][]float32, targets [][]float32) ([][]float32, [][]float32, float64, float64, error) {
@@ -198,9 +198,9 @@ func (o *optimizer) Regress(inputs [][]float32, targets [][]float32) ([][]float3
 		}
 	}
 
-	regLoss := 0.5 * o.cfg.lambda * o.model.SumSquaredWeights()
+	l2Reg := 0.5 * o.cfg.lambda * o.model.SumSquaredWeights()
 
-	return outputs, dCdA, loss, loss + regLoss, nil
+	return outputs, dCdA, loss, loss + l2Reg, nil
 }
 
 func (o *optimizer) test() error {
