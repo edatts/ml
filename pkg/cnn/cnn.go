@@ -4,14 +4,16 @@ import (
 	"fmt"
 	"math"
 	"slices"
+
+	"github.com/edatts/ml/pkg/model"
 )
 
 // Here, in this package, we shall create functions for the instantiation and training
 // of convolutional neural networks... Innit blud.
 
-type CNN struct {
-	lambda float32
+var _ model.Model = &CNN{}
 
+type CNN struct {
 	layers []Layer
 }
 
@@ -31,39 +33,59 @@ func (s Shape) Channels() int {
 	return s[2]
 }
 
-func New(inputShape, outputShape Shape) (*CNN, error) {
+func New(inputShape Shape, outputSize int) (*CNN, error) {
 	if inputShape.Channels() != 1 {
 		return nil, fmt.Errorf("only 1 input channel is currently supported")
 	}
 
 	c := &CNN{
-		lambda: 1e-4,
-		layers: nil,
+		layers: make([]Layer, 0),
 	}
 
 	var x Layer
 	x = newInput(inputShape)
 	fmt.Printf("Input Shape: %+v\n", x.Shape())
-	x = newConv2D(x, 32, c.lambda)
+	c.layers = append(c.layers, x)
+
+	x = newConv2D(x, 32)
 	fmt.Printf("After Conv: %+v\n", x.Shape())
+	c.layers = append(c.layers, x)
+
 	x = newPool2D(x)
 	fmt.Printf("After Pool: %+v\n", x.Shape())
-	x = newConv2D(x, 64, c.lambda)
+	c.layers = append(c.layers, x)
+
+	x = newConv2D(x, 64)
 	fmt.Printf("After Conv: %+v\n", x.Shape())
-	x = newConv2D(x, 128, c.lambda)
+	c.layers = append(c.layers, x)
+
+	x = newConv2D(x, 128)
 	fmt.Printf("After Conv: %+v\n", x.Shape())
+	c.layers = append(c.layers, x)
+
 	x = newPool2D(x)
 	fmt.Printf("After Pool: %+v\n", x.Shape())
-	x = newConv2D(x, 128, c.lambda)
+	c.layers = append(c.layers, x)
+
+	x = newConv2D(x, 128)
 	fmt.Printf("After Conv: %+v\n", x.Shape())
-	x = newConv2D(x, 256, c.lambda)
+	c.layers = append(c.layers, x)
+
+	x = newConv2D(x, 256)
 	fmt.Printf("After Conv: %+v\n", x.Shape())
-	x = newFullyConnected(256, x, c.lambda)
+	c.layers = append(c.layers, x)
+
+	x = newFullyConnected(128, x)
 	fmt.Printf("After Full: %+v\n", x.Shape())
-	x = newFullyConnected(256, x, c.lambda)
+	c.layers = append(c.layers, x)
+
+	x = newFullyConnected(64, x)
 	fmt.Printf("After Full: %+v\n", x.Shape())
-	out := newOutput(outputShape, x, c.lambda)
+	c.layers = append(c.layers, x)
+
+	out := newOutput(outputSize, x)
 	fmt.Printf("After Out: %+v\n", out.Shape())
+	c.layers = append(c.layers, out)
 
 	return c, nil
 }
@@ -84,13 +106,18 @@ func (c *CNN) outputLayer() Layer {
 	return c.layers[len(c.layers)-1]
 }
 
-func (c *CNN) Forward(batch []Sample) ([]Sample, error) {
+func (c *CNN) Forward(inputs [][]float32) ([][]float32, error) {
 	if len(c.layers) <= 2 {
 		return nil, fmt.Errorf("not enough layers")
 	}
 
-	if len(batch) == 0 {
+	if len(inputs) == 0 {
 		return nil, fmt.Errorf("empty input data")
+	}
+
+	batch, err := NewBatchFromSlices(c.inputLayer().Shape(), inputs)
+	if err != nil {
+		return nil, fmt.Errorf("failed instantiating batch: %w", err)
 	}
 
 	if batch[0].Shape != c.inputLayer().Shape() {
@@ -111,13 +138,18 @@ func (c *CNN) Forward(batch []Sample) ([]Sample, error) {
 	}
 
 	// Extract activations from output layer
-	return c.outputLayer().batch(), nil
+	return AsSlices(c.outputLayer().batch()), nil
 }
 
-func (c *CNN) Backward(lr float32) error {
+func (c *CNN) Backward(grads [][]float32, lr, lambda float64) error {
 	// To run the backwards pass we have to first calculate the loss
 	// and then compute the derivatives of weights and biases throughout
 	// the network with respect to the loss.
+
+	// Set grads in output layer
+	for i, sample := range grads {
+		c.outputLayer().activationDeltas()[i] = Sample{data: sample, Shape: c.outputLayer().Shape()}
+	}
 
 	// Run backwards pass
 	for i := len(c.layers) - 1; i > 0; i-- {
@@ -128,42 +160,42 @@ func (c *CNN) Backward(lr float32) error {
 
 	// Update layers
 	for _, l := range c.layers {
-		l.Update(lr)
+		l.update(lr, lambda)
 	}
 
 	return nil
 }
 
-func (c *CNN) Classify(batch []Sample, y [][]int) ([][]float32, float32, float32, error) {
-	output, err := c.Forward(batch)
-	if err != nil {
-		return nil, 0, 0, err
-	}
+// func (c *CNN) Classify(batch []Sample, y [][]int) ([][]float32, float32, float32, error) {
+// 	output, err := c.Forward(batch)
+// 	if err != nil {
+// 		return nil, 0, 0, err
+// 	}
 
-	preds := ToData(output)
+// 	preds := ToData(output)
 
-	loss, err := c.CategoricalCrossEntropy(preds, y)
-	if err != nil {
-		return nil, 0, 0, err
-	}
+// 	loss, err := c.CategoricalCrossEntropy(preds, y)
+// 	if err != nil {
+// 		return nil, 0, 0, err
+// 	}
 
-	// Regularize the loss with L2 regularization
-	// 0.5 * lambda * sum(W^2)
-	regLoss := 0.5 * c.lambda * c.sumSquaredWeights()
+// 	// Regularize the loss with L2 regularization
+// 	// 0.5 * lambda * sum(W^2)
+// 	regLoss := 0.5 * c.lambda * c.sumSquaredWeights()
 
-	return preds, c.Accuracy(preds, y), loss + regLoss, nil
-}
+// 	return preds, c.Accuracy(preds, y), loss + regLoss, nil
+// }
 
-func (c *CNN) Accuracy(preds [][]float32, y [][]int) float32 {
-	var numCorrect float32
-	for i, pred := range preds {
-		predIdx := slices.Index(pred, slices.Max(pred))
-		if y[i][predIdx] == 1 {
-			numCorrect++
-		}
-	}
-	return (numCorrect / float32(len(preds))) * float32(100)
-}
+// func (c *CNN) Accuracy(preds [][]float32, y [][]int) float32 {
+// 	var numCorrect float32
+// 	for i, pred := range preds {
+// 		predIdx := slices.Index(pred, slices.Max(pred))
+// 		if y[i][predIdx] == 1 {
+// 			numCorrect++
+// 		}
+// 	}
+// 	return (numCorrect / float32(len(preds))) * float32(100)
+// }
 
 // Formule for CCE: - sum(y * ln(ŷ))
 func (c *CNN) CategoricalCrossEntropy(preds [][]float32, y [][]int) (float32, error) {
@@ -198,11 +230,11 @@ func (c *CNN) CategoricalCrossEntropy(preds [][]float32, y [][]int) (float32, er
 	return crossEntSum / float32(len(preds)), nil
 }
 
-func (c *CNN) sumSquaredWeights() float32 {
+func (c *CNN) SumSquaredWeights() float64 {
 	// Take the sum of the square of all weights in the network
-	var sum float32
+	var sum float64
 	for _, l := range c.layers {
-		sum += l.sumSquaredWeights()
+		sum += float64(l.sumSquaredWeights())
 	}
 	return sum
 }

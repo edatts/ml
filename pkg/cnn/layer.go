@@ -10,6 +10,9 @@ import (
 	"github.com/edatts/ml/pkg/mat"
 )
 
+// There has been a fundamental misunderstanding of ther dimensions of
+// the kernels. A single Kernel is not 2D but infact three-dimensional
+// and depth (channels) must be equal to the input depth for the layer.
 type Kernel struct {
 	weights []float32
 	dCdW    []float32
@@ -17,8 +20,8 @@ type Kernel struct {
 	bias float32
 	dCdB float32
 
-	// shape int
-	size int // Only square for now
+	shape Shape // Should enforce (size, size, len(input))
+	// size int // Only square for now
 }
 
 func (k *Kernel) zeroGrads() {
@@ -31,7 +34,7 @@ func (k *Kernel) zeroGrads() {
 type Layer interface {
 	Forward() error
 	Backward() error
-	Update(lr float32)
+	update(lr, lambda float64)
 
 	// For CNNs we usually have shape (i, j, k, l) (batch_size, height, width, channels)
 	// where channels starts off as the number of input channels (eg; 1 for greyscale
@@ -55,22 +58,22 @@ const (
 	Output
 )
 
-func newLayer(lType LayerType, prev Layer, shape Shape, lambda float32) (Layer, error) {
-	switch lType {
-	case Input:
-		return &input{shape: shape}, nil
-	case Conv2D:
-		return newConv2D(prev, 32, lambda), nil
-	case Pooling2D:
-		return newPool2D(prev), nil
-	case FullyConnected:
-		return newFullyConnected(shape.Channels(), prev, lambda), nil
-	case Output:
-		return newOutput(shape, prev, lambda), nil
-	}
+// func newLayer(lType LayerType, prev Layer, shape Shape) (Layer, error) {
+// 	switch lType {
+// 	case Input:
+// 		return &input{shape: shape}, nil
+// 	case Conv2D:
+// 		return newConv2D(prev, 32), nil
+// 	case Pooling2D:
+// 		return newPool2D(prev), nil
+// 	case FullyConnected:
+// 		return newFullyConnected(shape.Channels(), prev), nil
+// 	case Output:
+// 		return newOutput(shape, prev), nil
+// 	}
 
-	return nil, fmt.Errorf("unknown layer type '%d'", lType)
-}
+// 	return nil, fmt.Errorf("unknown layer type '%d'", lType)
+// }
 
 // This layer simply holds the samples for a single batch. It has no kernels
 // and no activation functions, hence the activations of this layer are
@@ -100,7 +103,7 @@ func (l *input) Backward() error {
 }
 
 // NoOp. Nothing to update in this layer...
-func (l *input) Update(_ float32) {}
+func (l *input) update(_, _ float64) {}
 
 func (l *input) Shape() Shape {
 	return l.shape
@@ -123,9 +126,8 @@ func (l *input) sumSquaredWeights() float32 {
 }
 
 type conv2D struct {
-	prev   Layer
-	lambda float32
-	actFn  ActivationFunc
+	prev  Layer
+	actFn ActivationFunc
 
 	logits []Sample
 	dCdZ   []Sample
@@ -147,7 +149,7 @@ type conv2D struct {
 	batchSize   int
 }
 
-func newConv2D(prev Layer, numKernels int, lambda float32) *conv2D {
+func newConv2D(prev Layer, numKernels int) *conv2D {
 	// Need some logic to ensure that the kernel shape, input shape, and
 	// output shape are all compatible. This will need to take into
 	// account the stride and padding for the layer as well.
@@ -157,9 +159,8 @@ func newConv2D(prev Layer, numKernels int, lambda float32) *conv2D {
 	W_out := prev.Shape().Width() - 3 + 1
 
 	layer := &conv2D{
-		prev:   prev,
-		lambda: lambda,
-		actFn:  ReLU{},
+		prev:  prev,
+		actFn: ReLU{},
 
 		shape:      Shape{H_out, W_out, numKernels},
 		kernelSize: 3,
@@ -193,22 +194,22 @@ func (l *conv2D) init(batchSize int) {
 }
 
 func (l *conv2D) initKernels() {
-	kernelLen := l.kernelSize * l.kernelSize
-	numInputs := l.shape.Channels() * l.shape.Height() * l.shape.Width() * kernelLen
-
+	numInputs := l.prev.Shape().Channels() * l.kernelSize * l.kernelSize
 	l.kernels = make([]*Kernel, l.Shape().Channels())
 	for i := range len(l.kernels) {
 		l.kernels[i] = &Kernel{
-			weights: make([]float32, l.kernelSize*l.kernelSize),
-			dCdW:    make([]float32, l.kernelSize*l.kernelSize),
+			weights: make([]float32, numInputs),
+			dCdW:    make([]float32, numInputs),
 
-			bias: float32(rand.NormFloat64()*0.05 - 0.025),
+			bias: float32(rand.NormFloat64() * 0.05),
 			dCdB: 0,
 
-			size: l.kernelSize,
+			shape: [3]int{l.kernelSize, l.kernelSize, l.prev.Shape().Channels()},
+			// size: l.kernelSize,
 		}
 
 		for j := range l.kernels[i].weights {
+			// Kaiming He initialization
 			l.kernels[i].weights[j] = float32(rand.NormFloat64() * math.Sqrt(float64(2)/float64(numInputs)))
 		}
 	}
@@ -219,6 +220,7 @@ func (l *conv2D) initGrads(batchSize int) {
 	l.dCdA = NewBatch(batchSize, l.shape)
 }
 
+// TODO: This needs to be reworked to support the new kernel dimensions...
 func (l *conv2D) getKernelMatrix() (*mat.Matrix, error) {
 	// We need to remember to set the matrix to nil after every batch for this
 	// to work properly, otherwise the weights will never update...
@@ -231,12 +233,11 @@ func (l *conv2D) getKernelMatrix() (*mat.Matrix, error) {
 	}
 
 	kernelLen := l.kernelSize * l.kernelSize
+	// Each kernel spans a row...
 	numCols := kernelLen * l.prev.Shape().Channels()
 	var kernelMatrixData = make([]float32, len(l.kernels)*numCols)
 	for i, kernel := range l.kernels {
-		for j := range l.prev.Shape().Channels() {
-			copy(kernelMatrixData[(i*numCols)+(j*kernelLen):(i*numCols)+(j*kernelLen)+kernelLen], kernel.weights)
-		}
+		copy(kernelMatrixData[i*numCols:(i*numCols)+numCols], kernel.weights)
 	}
 
 	var err error
@@ -249,13 +250,15 @@ func (l *conv2D) getKernelMatrix() (*mat.Matrix, error) {
 }
 
 func (l *conv2D) getdCdZMatrix(dCdZ []float32) (*mat.Matrix, error) {
-	// We need to remember to set the matrix to nil after every batch for this
-	// to work properly, otherwise the weights will never update...
 	if len(dCdZ) == 0 {
 		return nil, fmt.Errorf("layer is not initialized, no dCdA found")
 	}
 
-	derivLen := l.shape.Height() * l.shape.Width()
+	slog.Info("dCdZ", "len", len(dCdZ))
+	slog.Info("dCdZ", "shape", l.dCdZ[0].Shape)
+	slog.Info("prev shape", "shape", l.prev.Shape())
+
+	derivLen := l.prev.Shape().Height() * l.prev.Shape().Width()
 	numCols := derivLen * l.prev.Shape().Channels()
 	var dCdZMatrixData = make([]float32, l.shape.Channels()*numCols)
 	for i := range dCdZ {
@@ -269,13 +272,15 @@ func (l *conv2D) getdCdZMatrix(dCdZ []float32) (*mat.Matrix, error) {
 		return nil, fmt.Errorf("failed instantiating activation derivative matrix: %w", err)
 	}
 
+	// slog.Info("dCdz matrix data", "data", dCdZMatrixData)
+
 	return dCdZMatrix, nil
 }
 
 func (l *conv2D) Forward() error {
 	// The way convolutions are usually handled is by converting the masked
-	// areas of the input into columns using the in2col method and unrolling
-	// the kenels into rows. This results in two matrices that can then be
+	// areas of the input into columns using the im2col method and unrolling
+	// the kernels into rows. This results in two matrices that can then be
 	// mulitplied together to produce the output feature map. If the input
 	// has multiple channels, we then calculate an elementwise sum of the
 	// result of the matrix multiplications to calculate our feature map.
@@ -300,6 +305,8 @@ func (l *conv2D) Forward() error {
 			return fmt.Errorf("im2col error: %w", err)
 		}
 
+		// slog.Info("sampleMatrix", "rows", sampleMatrix.NumRows(), "cols", sampleMatrix.NumCols())
+
 		featureMapsMatrix := mat.New(kernelMatrix.NumRows(), sampleMatrix.NumCols())
 		if err := featureMapsMatrix.Mul(kernelMatrix, sampleMatrix); err != nil {
 			return fmt.Errorf("failed multiplying kernel and sample matrices: %w", err)
@@ -311,7 +318,7 @@ func (l *conv2D) Forward() error {
 
 		// Apply bias to feature map for each kernel
 		for j := range l.logits[i].data {
-			l.logits[i].data[j] += l.kernels[j%featureMapsMatrix.NumCols()].bias
+			l.logits[i].data[j] += l.kernels[j%featureMapsMatrix.NumRows()].bias
 		}
 
 		// Apply activation func and store activations for backwards pass
@@ -340,6 +347,9 @@ func (l *conv2D) Backward() error {
 		}
 	}
 
+	// slog.Info("dCdA", "data", l.dCdA[0])
+	// slog.Info("dCdz", "data", l.dCdZ[0])
+
 	// dCdW = dz/dW * dC/dz
 	// dCdW = prevA * dC/dz (Using the convoluton operation)
 	for i, sample := range l.prev.batch() {
@@ -351,16 +361,29 @@ func (l *conv2D) Backward() error {
 			return fmt.Errorf("failed getting derivative matrix for activations: %w", err)
 		}
 
+		slog.Info("sample shape", "shape", sample.Shape)
+		slog.Info("dCdz shape", "shape", l.dCdZ[i].Shape)
+		slog.Info("dCdz matrix", "rows", dCdZMatrix.NumRows(), "cols", dCdZMatrix.NumCols())
+
 		sampleMatrix, err := sample.Im2Col(l.stride, l.shape.Height(), l.shape.Width())
 		if err != nil {
 			return fmt.Errorf("im2col error: %w", err)
 		}
+
+		slog.Info("prev acts matrix", "rows", sampleMatrix.NumRows(), "cols", sampleMatrix.NumCols())
+
+		// Desired shape of dCdW matrix is (256, 1152), currently this gets
+		// logged as (256, 9) which is WRONG. FUCKING WRONG! For this to be
+		// correct we need the dCdZ matrix to have dims (256, 128) and the
+		// sample matrix to have dimensions (128, 1152)... I think.
 
 		// Weight derivatives
 		dCdWMatrix := mat.New(dCdZMatrix.NumRows(), sampleMatrix.NumCols())
 		if err := dCdWMatrix.Mul(dCdZMatrix, sampleMatrix); err != nil {
 			return fmt.Errorf("failed muiltiplying derivative and sample matrices: %w", err)
 		}
+
+		slog.Info("dCdW Matrix", "rows", dCdWMatrix.NumRows(), "cols", dCdWMatrix.NumCols())
 
 		for j, kernel := range l.kernels {
 			// Store weight derivatives for update
@@ -374,14 +397,66 @@ func (l *conv2D) Backward() error {
 		// dC/prevA = dz/dprevA * dC/dz
 		// dC/prevA = W * dC/dz
 		if l.prev.activationDeltas() != nil { // Only if prev is not input...
+
+			// Here we need to do another convolution operation using the kernel
+			// weights in place of the input feature maps and the logit grads in
+			// place of the kernel. This operation should be a "full" convolution.
+			// This means we need to add some padding to the input depending on
+			// the difference in size between the input (kernel weights) and the
+			// kernel (in this case the logit grads). TBD on this exact formula
+			// but it needs to result in each element of the logit grads being
+			// convolved with every element of the input.
+
+			// Weights shape (one kernel): (3, 3, 128)
+			// Weights shape (volume, all kernels): (3, 3, 128, 256)
+			// Weights shape (matrix, all kernels): (256, 1152)
+			// Weights shape (matrix, all kernels, transpose): (1152, 256)
+
+			// Logit grads shape (volume): (1, 1, 256)
+			// Logit grads shape (im2col): ()
+
+			// Logit grads shape: (1, 1, 256)
+			// Weights shape: (3, 3, 256)
+			// Prev acts shape: (3, 3, 128)
+
 			kernelMatrix, err := l.getKernelMatrix()
 			if err != nil {
 				return fmt.Errorf("failed getting kernel matrix: %w", err)
 			}
 
+			// weightMatrix := mat.New(dCdWMatrix.NumRows(), dCdWMatrix.NumCols())
+			// for i, k := range l.kernels {
+			// 	for j, weight := range k.weights {
+			// 		weightMatrix.Data()[(len(k.weights)*i)+j] = weight
+			// 	}
+			// }
+
+			dCdZSample, err := NewSampleFromData(l.shape, l.dCdZ[i].data)
+			if err != nil {
+				return fmt.Errorf("failed getting sample from dCdZ data: %w", err)
+			}
+
+			dCdZIm2Col, err := dCdZSample.Im2Col(l.stride, 1, 1)
+			if err != nil {
+				return fmt.Errorf("failed applying Im2Col to dCdZ sample: %w", err)
+			}
+
+			slog.Info("dCdZ Im2Col", "rows", dCdZIm2Col.NumRows(), "cols", dCdZIm2Col.NumRows())
+
+			slog.Info("dCdZ", "rows", dCdZMatrix.NumRows(), "cols", dCdZMatrix.NumCols())
+			slog.Info("kernelMatrix", "rows", kernelMatrix.NumRows(), "cols", kernelMatrix.NumCols())
+			// slog.Info("weight matrix", "rows", weightMatrix.NumRows(), "cols", weightMatrix.NumCols())
+			slog.Info("prev acts", "shape", l.prev.activationDeltas()[0].Shape)
+
+			// Logit grads shape: (1, 1, 256)
+			// Weights shape: (3, 3, 256)
+			// Prev acts shape: (3, 3, 128)
+
 			dCdAMatrix := mat.New(dCdZMatrix.NumRows(), kernelMatrix.NumRows())
 			if err := dCdAMatrix.Mul(dCdZMatrix, kernelMatrix.Traspose()); err != nil {
-				return fmt.Errorf("faileded mulitplyig dCdz and weights: %w", err)
+				// dCdAMatrix := mat.New(weightMatrix.NumCols(), dCdZMatrix.NumCols())
+				// if err := dCdAMatrix.Mul(weightMatrix.Traspose(), dCdZMatrix); err != nil {
+				return fmt.Errorf("failed multiplying dCdz and transpose weights: %w", err)
 			}
 
 			prevActDeltas, err := NewSampleFromData(l.prev.Shape(), dCdAMatrix.Data())
@@ -405,13 +480,13 @@ func (l *conv2D) Backward() error {
 	return nil
 }
 
-func (l *conv2D) Update(lr float32) {
+func (l *conv2D) update(lr, lambda float64) {
 	for i, kernel := range l.kernels {
 		for j, weight := range kernel.weights {
-			kernel.weights[i] += (l.lambda * weight) + (-lr * kernel.dCdW[j])
+			kernel.weights[i] -= float32(lr) * (kernel.dCdW[j] + float32(lambda)*weight)
 		}
 
-		kernel.bias += -lr * kernel.dCdB
+		kernel.bias -= float32(lr) * kernel.dCdB
 	}
 }
 
@@ -428,7 +503,13 @@ func (l *conv2D) activationDeltas() []Sample {
 }
 
 func (l *conv2D) sumSquaredWeights() float32 {
-
+	var sum float32
+	for _, k := range l.kernels {
+		for _, w := range k.weights {
+			sum += w * w
+		}
+	}
+	return sum
 }
 
 type pool2D struct {
@@ -456,14 +537,14 @@ func newPool2D(prev Layer) *pool2D {
 
 	if prev.Shape().Height()%2 != 0 {
 		// Going to have to use padding...
-		slog.Warn("incompatible height, adding height padding...")
+		slog.Warn("pool2d incompatible height, adding height padding...")
 		H_pad = 1
 		// slog.Error("input shape is not compatible with pooling parameters", "inputShape", prev.Shape(), "poolingWindow", 2, "poolingStride", 2)
 		// panic("input height is not compatible with window size and stride of 2")
 	}
 
 	if prev.Shape().Width()%2 != 0 {
-		slog.Warn("incompatible width, adding width padding...")
+		slog.Warn("pool2d incompatible width, adding width padding...")
 		W_pad = 1
 		// slog.Error("input shape is not compatible with pooling parameters", "inputShape", prev.Shape(), "poolingWindow", 2, "poolingStride", 2)
 		// panic("input width is not compatible with window size and stride of 2")
@@ -494,9 +575,9 @@ func (l *pool2D) init(batchSize int) {
 		l.acts = NewBatch(batchSize, l.shape)
 	}
 
+	l.maxIndices = make([][]int, batchSize)
 	// Zero grads
 	l.dCdA = NewBatch(batchSize, l.shape)
-
 }
 
 // TODO: Tests for forward pass shape and values...
@@ -521,6 +602,8 @@ func (l *pool2D) Forward() error {
 	imageLen := H_in * W_in
 	paddedLen := (H_in + l.H_pad) * (W_in + l.W_pad)
 	outLen := H_out * W_out
+
+	// slog.Info("dims", "H_in", H_in, "paddedLen", paddedLen)
 
 	for n, sample := range l.prev.batch() {
 		var outData = make([]float32, outLen*sample.Channels())
@@ -552,6 +635,10 @@ func (l *pool2D) Forward() error {
 
 // TODO: Write test for padImage...
 func (l *pool2D) padImage(paddedLen int, data []float32) []float32 {
+	if paddedLen == len(data) {
+		return data
+	}
+
 	var out = make([]float32, paddedLen)
 	var x int
 	for i, datum := range data {
@@ -586,7 +673,7 @@ func (l *pool2D) Backward() error {
 }
 
 // NoOp. Nothing to update in this layer...
-func (l *pool2D) Update(_ float32) {}
+func (l *pool2D) update(_, _ float64) {}
 
 func (l *pool2D) Shape() Shape {
 	return l.shape
@@ -605,9 +692,8 @@ func (l *pool2D) sumSquaredWeights() float32 {
 }
 
 type fullyConnected struct {
-	prev   Layer
-	lambda float32
-	actFn  ActivationFunc
+	prev  Layer
+	actFn ActivationFunc
 
 	logits *mat.Matrix
 	dCdZ   *mat.Matrix
@@ -625,10 +711,12 @@ type fullyConnected struct {
 	biases []float32
 	dCdB   []float32
 
-	shape Shape
+	shape       Shape
+	initialized bool
+	batchSize   int
 }
 
-func newFullyConnected(numNeurons int, prev Layer, lambda float32) *fullyConnected {
+func newFullyConnected(numNeurons int, prev Layer) *fullyConnected {
 	// For now we're going to consider the shape of this type of layer to be
 	// (1, 1, C). We will omit a flattening layer and implement a flatten
 	// method on the Sample, this way we can represent the entirety of the
@@ -638,16 +726,14 @@ func newFullyConnected(numNeurons int, prev Layer, lambda float32) *fullyConnect
 	// backpropagate the gradients into the previous layer.
 
 	return &fullyConnected{
-		prev:   prev,
-		lambda: lambda,
-		actFn:  ReLU{},
+		prev:  prev,
+		actFn: ReLU{},
 
 		shape: [3]int{1, 1, numNeurons},
 	}
 }
 
 func (l *fullyConnected) init(batchSize int) {
-	panic("fully connected init is unimplemented")
 	if !l.initialized {
 		l.initWeights()
 		l.initBiases()
@@ -656,16 +742,37 @@ func (l *fullyConnected) init(batchSize int) {
 
 	if batchSize != l.batchSize {
 		l.batchSize = batchSize
-		l.logits
-		l.acts
+		l.logits = mat.New(batchSize, l.shape.Channels())
+		l.acts = NewBatch(batchSize, l.shape)
 	}
 
 	// Zero grads
-	l.dCdZ = mat.New(l.dCdZ.NumRows(), l.dCdZ.NumCols())
+	l.dCdZ = mat.New(batchSize, l.shape.Channels())
 	l.dCdA = NewBatch(batchSize, l.shape)
 	l.dCdW = mat.New(l.dCdW.NumRows(), l.dCdW.NumCols())
 	l.dCdB = make([]float32, len(l.dCdB))
 
+}
+
+func (l *fullyConnected) initWeights() {
+	// This assumes height and width of prev layer are both 1.
+	l.weights = mat.New(l.prev.Shape().Channels(), l.shape.Channels())
+	l.dCdW = mat.New(l.prev.Shape().Channels(), l.shape.Channels())
+
+	prevShape := l.prev.Shape()
+	numInputs := prevShape.Height() * prevShape.Width() * prevShape.Channels()
+	for i := range l.weights.Data() {
+		// Kaiming He initialization
+		l.weights.Data()[i] = float32(rand.NormFloat64() * math.Sqrt(float64(2)/float64(numInputs)))
+	}
+}
+
+func (l *fullyConnected) initBiases() {
+	l.biases = make([]float32, l.shape.Channels())
+	l.dCdB = make([]float32, l.shape.Channels())
+	for i := range l.biases {
+		l.biases[i] = float32(rand.NormFloat64() * 0.05)
+	}
 }
 
 func (l *fullyConnected) Forward() error {
@@ -736,6 +843,8 @@ func (l *fullyConnected) Backward() error {
 		return fmt.Errorf("failed multiplying logit deltas by transpose weights: %w", err)
 	}
 
+	// slog.Info("dCdA_prevMat", "data", dCdA_prevMat.Row(0))
+
 	for i := range dCdA_prevMat.NumRows() {
 		l.prev.activationDeltas()[i] = Sample{data: dCdA_prevMat.Row(i), Shape: l.prev.Shape()}
 	}
@@ -743,15 +852,15 @@ func (l *fullyConnected) Backward() error {
 	return nil
 }
 
-func (l *fullyConnected) Update(lr float32) {
+func (l *fullyConnected) update(lr, lambda float64) {
 	// Regularize and update weights
 	for i, weight := range l.weights.Data() {
-		l.weights.Data()[i] += (weight * l.lambda) + (-lr * l.dCdW.Data()[i])
+		l.weights.Data()[i] -= float32(lr) * (l.dCdW.Data()[i] + (weight * float32(lambda)))
 	}
 
 	// Update biases
 	for i := range l.biases {
-		l.biases[i] += -lr * l.dCdB[i]
+		l.biases[i] -= float32(lr) * l.dCdB[i]
 	}
 }
 
@@ -768,14 +877,18 @@ func (l *fullyConnected) activationDeltas() []Sample {
 }
 
 func (l *fullyConnected) sumSquaredWeights() float32 {
-
+	var sum float32
+	for _, w := range l.weights.Data() {
+		sum += w * w
+	}
+	return sum
 }
 
-func newOutput(shape Shape, prev Layer, lambda float32) *output {
+func newOutput(numOutputs int, prev Layer) *output {
 	return &output{
-		fullyConnected: newFullyConnected(shape.Channels(), prev, lambda),
+		fullyConnected: newFullyConnected(numOutputs, prev),
 		actFn:          SoftMax{},
-		shape:          shape,
+		shape:          [3]int{1, 1, numOutputs},
 	}
 }
 

@@ -21,7 +21,7 @@ func NewSample(shape Shape) Sample {
 
 func NewSampleFromData(shape Shape, data []float32) (Sample, error) {
 	if len(data) != shape.Height()*shape.Width()*shape.Channels() {
-		return Sample{}, fmt.Errorf("length of data does not match provided dimensions")
+		return Sample{}, fmt.Errorf("data is not compatible with provided shape, len(data)=%d, shape=%v", len(data), shape)
 	}
 
 	return Sample{
@@ -69,6 +69,31 @@ func NewBatchFromMatrix(shape Shape, matrix *mat.Matrix) ([]Sample, error) {
 	}
 
 	return out, nil
+}
+
+func NewBatchFromSlices(shape Shape, slices [][]float32) ([]Sample, error) {
+	if slices == nil {
+		return nil, fmt.Errorf("input slice is nil")
+	}
+
+	var err error
+	var out = make([]Sample, len(slices))
+	for i, row := range slices {
+		out[i], err = NewSampleFromData(shape, row)
+		if err != nil {
+			return nil, fmt.Errorf("failed instantiating sample: %w", err)
+		}
+	}
+
+	return out, nil
+}
+
+func AsSlices(batch []Sample) [][]float32 {
+	var out = make([][]float32, len(batch))
+	for i, sample := range batch {
+		out[i] = sample.data
+	}
+	return out
 }
 
 func (s Sample) ImageSize() int {
@@ -145,7 +170,7 @@ func (s Sample) Im2Col(stride, kernelHeight, kernelWidth int) (*mat.Matrix, erro
 	W_sMat := (s.Width() - kernelWidth + 1)
 	numStrides := H_sMat * W_sMat
 
-	slog.Info("stride info", "numStrides", numStrides, "H_sMat", H_sMat, "W_sMat", W_sMat)
+	// slog.Info("stride info", "numStrides", numStrides, "H_sMat", H_sMat, "W_sMat", W_sMat)
 
 	// The total size of the sample matrix is the number of elements in one
 	// column multiplied by the number of strides. The number of elements in
@@ -164,10 +189,15 @@ func (s Sample) Im2Col(stride, kernelHeight, kernelWidth int) (*mat.Matrix, erro
 					copy(col[(n*kernelLen)+(k*kernelWidth):(n*kernelLen)+(k*kernelWidth)+kernelWidth], image[(i*s.Width())+j+(k*s.Width()):(i*s.Width())+j+(k*s.Width())+kernelWidth])
 				}
 			}
-			slog.Info("col", "col", col)
+			// slog.Info("col", "col", col)
 			sampleMatDataColMajor = append(sampleMatDataColMajor, col...)
 		}
 	}
+
+	slog.Info("im2Col", "shape", s.Shape)
+	slog.Info("im2col", "H_sMat", H_sMat, "W_sMat", W_sMat)
+	slog.Info("im2col", "rows", rowLen, "cols", sampleMatNumRows)
+	slog.Info("data len", "len", len(sampleMatDataColMajor))
 
 	// Parsing as the transpose of the desired matrix for simplicity
 	sampleMatrixColMajor, err := mat.NewFromData(rowLen, sampleMatNumRows, sampleMatDataColMajor)
