@@ -195,7 +195,7 @@ func (m *Matrix) Mul(A, B *Matrix) error {
 					B3 := B.data[chunkIdx+(2*BN) : chunkIdx+(2*BN)+8]
 					B4 := B.data[chunkIdx+(3*BN) : chunkIdx+(3*BN)+8]
 
-					// This is our GoASM func that handles the muliplicaitons and
+					// This is our GoASM func that handles the muliplications and
 					// additions for each chunk, the results are accumulated in the
 					// output slice in an additive fashion.
 					DotMatChunk8(A1, B1, B2, B3, B4, outRow[kIdx:kIdx+8])

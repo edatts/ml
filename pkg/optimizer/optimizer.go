@@ -115,6 +115,8 @@ func (o *optimizer) train() error {
 	return nil
 }
 
+// initTrainingRun initializes a training run based on the provided config and
+// the type of the provided sampler.
 func (o *optimizer) initTrainingRun() error {
 	if o.cfg.classification {
 		sampler, ok := o.sampler.(ClassificationSampler)

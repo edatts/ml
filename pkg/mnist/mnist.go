@@ -12,6 +12,8 @@ import (
 	"github.com/edatts/ml/pkg/idx"
 )
 
+// LoadData loads the MNIST hand written digits dataset and converts the
+// labels into one-hot encodings.
 func LoadData() (X_train [][]float32, Y_train [][]int, X_test [][]float32, Y_test [][]int, err error) {
 	var (
 		tarFile = "../../data/mnist/mnist.tar.gz"
