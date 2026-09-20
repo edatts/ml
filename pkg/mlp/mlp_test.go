@@ -96,6 +96,7 @@ func TestMLP(t *testing.T) {
 		require.NoError(t, err)
 
 		o := optimizer.New(
+			optimizer.WithModel(model),
 			optimizer.WithClassification(),
 			optimizer.WithNumEpochs(50),
 			optimizer.WithBatchSize(16),
@@ -107,9 +108,9 @@ func TestMLP(t *testing.T) {
 			optimizer.WithSampler(optimizer.NewRS2Sampler[int](1)),
 		)
 
-		require.NoError(t, o.Run(model))
+		require.NoError(t, o.Run())
 
-		_, _, accuracy, regLoss, err := o.Classify(X_test, Y_test)
+		_, _, accuracy, regLoss, err := o.Classify(X_test, Y_test, true)
 		require.NoError(t, err)
 
 		slog.Info("loss", "loss", regLoss)
@@ -148,6 +149,7 @@ func TestMLP(t *testing.T) {
 		require.NoError(t, err)
 
 		o := optimizer.New(
+			optimizer.WithModel(model),
 			optimizer.WithNumEpochs(50),
 			optimizer.WithBatchSize(32),
 			optimizer.WithLearningRate(0.2),
@@ -158,9 +160,9 @@ func TestMLP(t *testing.T) {
 			optimizer.WithSampler(optimizer.NewConvenienceSampler[float32]()),
 		)
 
-		require.NoError(t, o.Run(model))
+		require.NoError(t, o.Run())
 
-		outputs, _, mse, regLoss, err := o.Regress(X_test, Y_test)
+		outputs, _, mse, regLoss, err := o.Regress(X_test, Y_test, true)
 		require.NoError(t, err)
 
 		slog.Info("loss", "loss", regLoss)
@@ -225,6 +227,7 @@ func TestMLP(t *testing.T) {
 		require.NoError(t, err)
 
 		o := optimizer.New(
+			optimizer.WithModel(model),
 			optimizer.WithClassification(),
 			optimizer.WithNumEpochs(10),
 			optimizer.WithBatchSize(128),
@@ -237,8 +240,57 @@ func TestMLP(t *testing.T) {
 
 		slog.Info("starting model training...")
 
-		require.NoError(t, o.Run(model))
+		require.NoError(t, o.Run())
 
+	})
+
+	t.Run("save and load weights", func(t *testing.T) {
+		X_train, Y_train, X_test, Y_test, err := mnist.LoadData()
+		require.NoError(t, err)
+
+		model, err := mlp.New(
+			784, 10,
+			mlp.WithClassifcation(),
+			mlp.WithHiddenLayers(512, 384, 256),
+		)
+		require.NoError(t, err)
+
+		o := optimizer.New(
+			optimizer.WithModel(model),
+			optimizer.WithClassification(),
+			optimizer.WithNumEpochs(5),
+			optimizer.WithBatchSize(128),
+			optimizer.WithLearningRate(0.075),
+			optimizer.WithLearningRateDecay(0.0025),
+			optimizer.WithSampler(optimizer.NewRS2Sampler[int](0.10)),
+			optimizer.WithTrainDataProvider(func() ([][]float32, any, error) { return X_train, Y_train, nil }),
+			optimizer.WithTestDataProvider(func() ([][]float32, any, error) { return X_test, Y_test, nil }),
+		)
+
+		require.NoError(t, o.Run())
+
+		testOutput, err := model.Forward(X_test, true)
+		require.NoError(t, err)
+
+		parameters := model.Weights()
+
+		model, err = mlp.New(
+			784, 10,
+			mlp.WithClassifcation(),
+			mlp.WithHiddenLayers(512, 384, 256),
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, model.LoadWeights(parameters))
+
+		testOutputAfterLoad, err := model.Forward(X_test, true)
+		require.NoError(t, err)
+
+		for i, sample := range testOutputAfterLoad {
+			for j, elem := range sample {
+				require.Equal(t, testOutput[i][j], elem)
+			}
+		}
 	})
 
 	// <-ctx.Done()

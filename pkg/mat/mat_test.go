@@ -209,7 +209,7 @@ func TestMatrixTranspose(t *testing.T) {
 		m, err := mat.NewFromData(test.h, test.w, test.data)
 		require.NoError(t, err)
 
-		for i, elem := range m.Traspose().Data() {
+		for i, elem := range m.Transpose().Data() {
 			require.Equal(t, test.expected[i], elem)
 		}
 	}

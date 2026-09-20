@@ -79,7 +79,7 @@ func (m *Matrix) Row(i int) []float32 {
 	return m.data[start : start+m.NumCols()]
 }
 
-func (m *Matrix) Traspose() *Matrix {
+func (m *Matrix) Transpose() *Matrix {
 	if len(m.data) == 0 {
 		return m
 	}
@@ -255,7 +255,7 @@ func (m *Matrix) mulValidate(A, B *Matrix) error {
 	}
 
 	if A.NumCols() != B.NumRows() {
-		return fmt.Errorf("matrices are incompatible shapes for multiplication")
+		return fmt.Errorf("matrices are incompatible shapes for multiplication, shapes(A=%v, B=%v)", A.shape, B.shape)
 	}
 
 	if m.NumRows() != A.NumRows() || m.NumCols() != B.NumCols() {

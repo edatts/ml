@@ -6,26 +6,35 @@ import (
 	"math/rand/v2"
 
 	"github.com/edatts/ml/pkg/mat"
+	"github.com/edatts/ml/pkg/model"
 )
+
+type Shape = model.Shape
 
 type Layer interface {
 	Backward() error
 	Forward() error
+	Shape() Shape
+	Type() LayerType
+
 	width() int
 	activations() *mat.Matrix
 	grads() *mat.Matrix
 	update(lr, lambda float64)
 	init(batchSize int)
 	sumSquaredWeights() float64
+	data() [2]model.Tensor
 }
 
-type LayerType int
+type LayerType string
 
 const (
-	Input LayerType = iota
-	Hidden
-	Output
+	Input  LayerType = "input"
+	Hidden LayerType = "hidden"
+	Output LayerType = "output"
 )
+
+var _ Layer = &input{}
 
 type input struct {
 	// TODO: Add shape to all layer types
@@ -33,7 +42,8 @@ type input struct {
 
 	acts *mat.Matrix
 
-	size int
+	size  int
+	shape Shape
 }
 
 func (i *input) Backward() error {
@@ -67,12 +77,27 @@ func (i *input) sumSquaredWeights() float64 {
 	return 0
 }
 
+func (i *input) data() [2]model.Tensor {
+	return [2]model.Tensor{}
+}
+
+func (i *input) Shape() Shape {
+	return i.shape
+}
+
+func (i *input) Type() LayerType {
+	return Input
+}
+
+var _ Layer = &layer{}
+
 type layer struct {
-	prev        Layer
-	actFn       ActivationFunc
-	initialized bool
-	batchSize   int
-	size        int
+	prev  Layer
+	actFn ActivationFunc
+	// initialized bool
+	batchSize int
+	size      int
+	isOutput  bool
 
 	// weights [][]float64
 	// dCdW    [][]float64
@@ -93,30 +118,35 @@ type layer struct {
 	// dCdA        [][]float64
 	acts *mat.Matrix
 	dCdA *mat.Matrix
+
+	shape Shape
 }
 
-type output struct {
-	*layer
+// var _ Layer = &output{}
 
-	actFn SoftMax
-}
+// type output struct {
+// 	*layer
 
-// Override the Activations() receiver of the embedded layer so that we can
-// apply the softmax activation when reading the output activations.
-func (o *output) activations() *mat.Matrix {
-	for i := range o.logits.NumRows() {
-		for j, act := range o.actFn.Forward(o.logits.Row(i)) {
-			o.acts.Row(i)[j] = act
-		}
-	}
+// 	actFn SoftMax
+// }
 
-	return o.acts
-}
+// // Override the Activations() receiver of the embedded layer so that we can
+// // apply the softmax activation when reading the output activations.
+// func (o *output) activations() *mat.Matrix {
+// 	for i := range o.logits.NumRows() {
+// 		for j, act := range o.actFn.Forward(o.logits.Row(i)) {
+// 			o.acts.Row(i)[j] = act
+// 		}
+// 	}
+
+// 	return o.acts
+// }
 
 func (m *MLP) newLayer(lType LayerType, n int, prev Layer) Layer {
 	if lType == Input {
 		return &input{
-			size: n,
+			size:  n,
+			shape: Shape{0, 0, 0, n},
 		}
 	}
 
@@ -124,16 +154,21 @@ func (m *MLP) newLayer(lType LayerType, n int, prev Layer) Layer {
 		prev:  prev,
 		actFn: m.getActivationFunc(lType),
 		size:  n,
+		shape: Shape{0, 0, 0, n},
 	}
 
 	// In case of classification we embed the final layer to overwrite it's
 	// activations() receiver to apply the Softmax activation function.
 	if lType == Output && m.classification {
-		out := &output{
-			layer: l,
-		}
-		return out
+		l.isOutput = true
+		// out := &output{
+		// 	layer: l,
+		// }
+		// return out
 	}
+
+	l.weights, l.dCdW = initWeights(l.actFn, l.prev.width(), l.width())
+	l.biases, l.dCdB = initBiases(l.width())
 
 	return l
 }
@@ -147,6 +182,16 @@ func (l *layer) grads() *mat.Matrix {
 }
 
 func (l *layer) activations() *mat.Matrix {
+	if l.isOutput {
+		// Override the Activations() receiver of the embedded layer so that we can
+		// apply the softmax activation when reading the output activations.
+		for i := range l.logits.NumRows() {
+			for j, act := range (SoftMax{}).Forward(l.logits.Row(i)) {
+				l.acts.Row(i)[j] = act
+			}
+		}
+	}
+
 	return l.acts
 }
 
@@ -155,12 +200,12 @@ func (l *layer) init(batchSize int) {
 		return
 	}
 
-	if !l.initialized {
-		// Init
-		l.weights, l.dCdW = initWeights(l.actFn, l.prev.width(), l.width())
-		l.biases, l.dCdB = initBiases(l.width())
-		l.initialized = true
-	}
+	// if !l.initialized {
+	// 	// Init
+	// 	l.weights, l.dCdW = initWeights(l.actFn, l.prev.width(), l.width())
+	// 	l.biases, l.dCdB = initBiases(l.width())
+	// 	l.initialized = true
+	// }
 
 	if batchSize != l.batchSize {
 		// Update batch size
@@ -220,7 +265,7 @@ func (l *layer) Backward() error {
 	l.dCdB = l.dCdz.AvgCols()
 
 	// dCdW = sum(prevA * dC/dz)/batchSize
-	if err := l.dCdW.Mul(l.prev.activations().Traspose(), l.dCdz); err != nil {
+	if err := l.dCdW.Mul(l.prev.activations().Transpose(), l.dCdz); err != nil {
 		return fmt.Errorf("failed multiplying acts transpose with logit grads: %w", err)
 	}
 
@@ -229,7 +274,7 @@ func (l *layer) Backward() error {
 
 	// dCdA_(L-1) = W * dCdz
 	if l.prev.grads() != nil && l.prev.grads().Data() != nil { // Exclude input layer
-		if err := l.prev.grads().Mul(l.dCdz, l.weights.Traspose()); err != nil {
+		if err := l.prev.grads().Mul(l.dCdz, l.weights.Transpose()); err != nil {
 			return fmt.Errorf("failed multiplying logit grads with weights transpose: %w", err)
 		}
 	}
@@ -248,7 +293,30 @@ func (l *layer) update(lr, lambda float64) {
 	for i := range l.biases {
 		l.biases[i] += float32(-lr) * l.dCdB[i]
 	}
+}
 
+func (l *layer) data() [2]model.Tensor {
+	return [2]model.Tensor{
+		{
+			Data:  l.weights.Data(),
+			Shape: model.Shape{0, 0, l.weights.NumRows(), l.weights.NumCols()},
+		},
+		{
+			Data:  l.biases,
+			Shape: model.Shape{0, 0, 0, len(l.biases)},
+		},
+	}
+}
+
+func (i *layer) Shape() Shape {
+	return i.shape
+}
+
+func (i *layer) Type() LayerType {
+	if i.isOutput {
+		return Output
+	}
+	return Hidden
 }
 
 func initWeights(act ActivationFunc, prevWidth, width int) (*mat.Matrix, *mat.Matrix) {

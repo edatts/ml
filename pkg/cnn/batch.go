@@ -2,7 +2,6 @@ package cnn
 
 import (
 	"fmt"
-	"log/slog"
 
 	"github.com/edatts/ml/pkg/mat"
 )
@@ -209,10 +208,12 @@ func (s Sample) Im2Col(stride, kernelHeight, kernelWidth int, padding Padding, p
 		panic("only stride of 1 currently supported...")
 	}
 
-	P_h, P_w, err := getPadding(padding, kernelHeight, kernelWidth)
+	P_t, P_b, P_l, P_r, err := getPadding(padding, kernelHeight, kernelWidth)
 	if err != nil {
 		return nil, fmt.Errorf("failed getting padding: %w", err)
 	}
+
+	P_h, P_w := P_t+P_b, P_l+P_r
 
 	// Full formula for output size of convolution:
 	//
@@ -256,7 +257,7 @@ func (s Sample) Im2Col(stride, kernelHeight, kernelWidth int, padding Padding, p
 	// one column is the kernel volume.
 	kernelArea := kernelHeight * kernelWidth
 
-	slog.Info("im2col info", "numStrides", numStrides, "H_out", H_out, "W_out", W_out, "P_h", P_h, "P_w", P_w, "len(data)", kernelArea*s.Channels()*numStrides)
+	// slog.Info("im2col info", "numStrides", numStrides, "H_out", H_out, "W_out", W_out, "P_h", P_h, "P_w", P_w, "len(data)", kernelArea*s.Channels()*numStrides)
 
 	// Iteration variables.
 	var writeIdx int
@@ -293,21 +294,19 @@ func (s Sample) Im2Col(stride, kernelHeight, kernelWidth int, padding Padding, p
 	//	- (2, 1) -> (3, 2)
 	//	- (2, 2) -> (3, 3)
 	//
-	// Padded Input (P_h = 4, P_w = 4):
+	// Padded Input (P_t = 2, P_b = 1, P_l = 2, P_r = 1):
 	//
-	// 	+ -- + -- + -- + -- + -- + -- +
-	// 	| 00 | 00 | 00 | 00 | 00 | 00 |
-	// 	+ -- + -- + -- + -- + -- + -- +
-	// 	| 00 | 00 | 00 | 00 | 00 | 00 |
-	// 	+ -- + -- + -- + -- + -- + -- +
-	// 	| 00 | 00 | 33 | 34 | 00 | 00 |
-	// 	+ -- + -- + -- + -- + -- + -- +
-	// 	| 00 | 00 | 43 | 44 | 00 | 00 |
-	// 	+ -- + -- + -- + -- + -- + -- +
-	//  | 00 | 00 | 00 | 00 | 00 | 00 |
-	//  + -- + -- + -- + -- + -- + -- +
-	//  | 00 | 00 | 00 | 00 | 00 | 00 |
-	//  + -- + -- + -- + -- + -- + -- +
+	// 	+ -- + -- + -- + -- + -- +
+	// 	| 00 | 00 | 00 | 00 | 00 |
+	// 	+ -- + -- + -- + -- + -- +
+	// 	| 00 | 00 | 00 | 00 | 00 |
+	// 	+ -- + -- + -- + -- + -- +
+	// 	| 00 | 00 | 33 | 34 | 00 |
+	// 	+ -- + -- + -- + -- + -- +
+	// 	| 00 | 00 | 43 | 44 | 00 |
+	// 	+ -- + -- + -- + -- + -- +
+	//  | 00 | 00 | 00 | 00 | 00 |
+	//  + -- + -- + -- + -- + -- +
 	//
 	// In this exmaple the indices of the actual data map like so:
 	//	- (1, 1) -> (3, 3)
@@ -315,11 +314,12 @@ func (s Sample) Im2Col(stride, kernelHeight, kernelWidth int, padding Padding, p
 	//	- (2, 1) -> (4, 3)
 	//	- (2, 2) -> (4, 4)
 	//
-	// So it looks like we just need to add half of the total
-	// padding to the index for each dimension.
+	// Based on the above examples we simply need to add the top
+	// padding to the height index and the left padding to the
+	// width index.
 	//
-	// Idx_hp = Idx_h + P_h / 2
-	// Idx_wp = Idx_w + P_w / 2
+	// Idx_hp = Idx_h + P_t
+	// Idx_wp = Idx_w + P_l
 	//
 	// Ideally we would be able to allocate the padding only at
 	// the destination but it will probably be a lot easier to
@@ -335,7 +335,7 @@ func (s Sample) Im2Col(stride, kernelHeight, kernelWidth int, padding Padding, p
 		// the padded data is (H_in+P_h) * (W_in+P_w) * numChannels.
 		var strides = s.Shape.Strides()
 		var paddedStrides = Shape{s.Channels(), s.Height() + P_h, s.Width() + P_w}.Strides()
-		var paddedData = make([]float32, (s.Height()+P_h)*(s.Width()*P_w)*s.Channels())
+		var paddedData = make([]float32, (s.Height()+P_h)*(s.Width()+P_w)*s.Channels())
 		for i := 0; i < len(s.data); i += s.Width() {
 			// Copy the data into the new slice, transforming the original
 			// indices into corresponding indices in the padded slice.
@@ -344,11 +344,12 @@ func (s Sample) Im2Col(stride, kernelHeight, kernelWidth int, padding Padding, p
 			// Idx_wp = Idx_w + P_w / 2
 			//
 			indices := strides.Indices(i)
-			indices[1] = indices.H() + P_h/2
-			indices[2] = indices.W() + P_w/2
+			indices[1] = indices.H() + P_t
+			indices[2] = indices.W() + P_l
 			idx := paddedStrides.FlatIndex(indices)
 
-			copy(paddedData[idx:idx+s.Width()], s.data[i:i+s.Width()])
+			src := s.data[i : i+s.Width()]
+			copy(paddedData[idx:idx+s.Width()], src)
 		}
 		data = paddedData
 	}
@@ -403,9 +404,9 @@ func (s Sample) Im2Col(stride, kernelHeight, kernelWidth int, padding Padding, p
 		colMajorCols /= s.Channels()
 	}
 
-	slog.Info("im2col info", "numStrides", numStrides, "H_out", H_out, "W_out", W_out)
-	slog.Info("im2col matrix", "height", colMajorCols, "width", colMajorRows)
-	slog.Info("data len", "len", len(sampleMatDataColMajor))
+	// slog.Info("im2col info", "numStrides", numStrides, "H_out", H_out, "W_out", W_out)
+	// slog.Info("im2col matrix", "height", colMajorCols, "width", colMajorRows)
+	// slog.Info("data len", "len", len(sampleMatDataColMajor))
 
 	sampleMatrixColMajor, err := mat.NewFromData(colMajorRows, colMajorCols, sampleMatDataColMajor)
 	if err != nil {
@@ -415,39 +416,62 @@ func (s Sample) Im2Col(stride, kernelHeight, kernelWidth int, padding Padding, p
 	return sampleMatrixColMajor.Transpose(), nil
 }
 
-func getPadding(padding Padding, K_h, K_w int) (int, int, error) {
-	if K_h%2 != 1 {
-		return 0, 0, fmt.Errorf("kernel height must be odd")
-	}
+func getPadding(padding Padding, K_h, K_w int) (int, int, int, int, error) {
+	// if K_h%2 != 1 {
+	// 	return 0, 0, fmt.Errorf("kernel height must be odd")
+	// }
 
-	if K_w%2 != 1 {
-		return 0, 0, fmt.Errorf("kernel width must be odd")
-	}
+	// if K_w%2 != 1 {
+	// 	return 0, 0, fmt.Errorf("kernel width must be odd")
+	// }
 
-	// When considering padding it is convenient to assert that the kernel uses an
-	// odd number of elements. This is because it allows us to always pad with the
-	// same number of rows above and below the input and the same number of columns
+	// When considering padding if we were to assert that the kernel uses an odd
+	// number of elements then it would allow us to always pad with the same
+	// number of rows above and below the input and the same number of columns
 	// to the left and right of the input.
 	//
 	// In this case the formula for total "Same" height and width padding is:
 	//
-	// P_h = (K_h - 1)
-	// P_w = (K_w - 1)
+	// P_h = K_h - 1
+	// P_w = K_w - 1
 	//
 	// While the formula for total "Full" height and width padding is:
 	//
 	// P_h = (K_h - 1) * 2
 	// P_w = (K_w - 1) * 2
 	//
+	// If we have a kernel with odd dimensions we can simply divide the integer
+	// values by 2 and accept the floored values for each end of the dimension.
+	// If the kernel is even we will need to add one to one of the dimensions,
+	// here we arbnitrarily use top and left.
 	switch padding {
 	case Valid:
-		return 0, 0, nil
+		return 0, 0, 0, 0, nil
 	case Same:
-		return (K_h - 1), (K_w - 1), nil
+
+		// If the kernel size is even then we will end up with a different amount
+		// of padding between the top and bottom and between the left and right.
+		// This means any code that relies on this assumption by using the full
+		// padding for dimensions in calculations needs to be reviewed as it.
+		//
+		// By default let's just pad the top and left
+		var addTopPad int
+		if K_h%2 != 1 {
+			addTopPad = 1
+		}
+
+		var addLeftPad int
+		if K_w%2 != 1 {
+			addLeftPad = 1
+		}
+
+		return (K_h-1)/2 + addTopPad, (K_w - 1) / 2, (K_h-1)/2 + addLeftPad, (K_w - 1) / 2, nil
 	case Full:
-		return (K_h - 1) * 2, (K_w - 1) * 2, nil
+		// If we have even kernel dimensions and want to do full pading we need both
+		// sides of each dimension to have the same padding.
+		return (K_h - 1), (K_w - 1), (K_h - 1), (K_w - 1), nil
 	default:
-		return 0, 0, fmt.Errorf("unsupported padding type '%s'", padding)
+		return 0, 0, 0, 0, fmt.Errorf("unsupported padding type '%s'", padding)
 	}
 }
 

@@ -1,17 +1,20 @@
 package mlp
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 
+	"github.com/edatts/ml/pkg/mat"
 	"github.com/edatts/ml/pkg/model"
 )
 
 var _ model.Model = &MLP{}
 
 type MLP struct {
-	Layers []Layer
-
+	Layers         []Layer
 	classification bool
+	identity       string
 }
 
 type Option func(*MLP)
@@ -77,7 +80,7 @@ func (m *MLP) SumSquaredWeights() float64 {
 	return sum
 }
 
-func (m *MLP) Forward(batch [][]float32) ([][]float32, error) {
+func (m *MLP) Forward(batch [][]float32, _ bool) ([][]float32, error) {
 	if len(m.Layers) < 2 {
 		return nil, ErrNotEnoughLayers
 	}
@@ -111,7 +114,7 @@ func (m *MLP) Forward(batch [][]float32) ([][]float32, error) {
 
 }
 
-func (m *MLP) Backward(dCdA [][]float32, lr, lambda float64) error {
+func (m *MLP) Backward(dCdA [][]float32, lr, lambda, _ float64) error {
 	// Set gradients of output layer
 	for i := range len(dCdA) {
 		for j := range len(dCdA[0]) {
@@ -131,4 +134,82 @@ func (m *MLP) Backward(dCdA [][]float32, lr, lambda float64) error {
 	}
 
 	return nil
+}
+
+func (m *MLP) learnableLayers() []*layer {
+	var out []*layer
+	for _, l := range m.Layers {
+		if learnable, ok := l.(*layer); ok {
+			out = append(out, learnable)
+		}
+	}
+	return out
+}
+
+func (m *MLP) Weights() []model.Tensor {
+	var out []model.Tensor
+	for i, l := range m.learnableLayers() {
+		d := l.data()
+
+		d[0].Name = fmt.Sprintf("hidden.%d.weights", i)
+		out = append(out, d[0])
+
+		d[1].Name = fmt.Sprintf("hidden.%d.biases", i)
+		out = append(out, d[1])
+	}
+
+	return out
+}
+
+func (m *MLP) LoadWeights(parameters []model.Tensor) error {
+	var numLearnable = len(m.learnableLayers())
+	if len(parameters) != numLearnable*2 {
+		return fmt.Errorf("unexpected number of weight tensors, expected %d, got %d", numLearnable*2, len(parameters))
+	}
+
+	for i, l := range m.learnableLayers() {
+		l.init(0) // To ensure we don't overwrite loaded weights later.
+		weights := parameters[i*2]
+		biases := parameters[i*2+1]
+
+		if l.prev.width() != weights.Shape.Height() {
+			return fmt.Errorf("invalid height for weights in learnable layer %d, expected %d, got %d", i, l.prev.width(), weights.Shape.Height())
+		}
+
+		if l.width() != weights.Shape.Width() {
+			return fmt.Errorf("invalid width for weights in learnable layer %d, expected %d, got %d", i, l.width(), weights.Shape.Width())
+		}
+
+		if l.width() != biases.Shape.Width() {
+			return fmt.Errorf("invalid width for biases in learnable layer %d, expected %d, got %d", i, len(l.biases), biases.Shape.Width())
+		}
+
+		var err error
+		if l.weights, err = mat.NewFromData(l.prev.width(), l.width(), weights.Data); err != nil {
+			return fmt.Errorf("failed loading weights: %w", err)
+		}
+
+		l.biases = biases.Data
+	}
+
+	return nil
+}
+
+// Identity returns the hex encoded sha256 hash of the concatenation of the
+// layer type and the layer shape bytes for all layers.
+func (m *MLP) Identity() string {
+	if m.identity != "" {
+		return m.identity
+	}
+
+	var b []byte
+	for _, l := range m.Layers {
+		b = append(b, []byte(l.Type())...)
+		b = append(b, l.Shape().Bytes()...)
+	}
+
+	h := sha256.New()
+	_, _ = h.Write(b)
+	m.identity = hex.EncodeToString(h.Sum(nil))
+	return m.identity
 }

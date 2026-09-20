@@ -14,7 +14,6 @@ func TestCNN(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("mnist handwritten digits", func(t *testing.T) {
-
 		X_train, Y_train, X_test, Y_test, err := mnist.LoadData()
 		require.NoError(t, err)
 
@@ -27,17 +26,55 @@ func TestCNN(t *testing.T) {
 		}
 
 		o := optimizer.New(
-			optimizer.WithNumEpochs(20),
+			optimizer.WithModel(network),
+			optimizer.WithNumEpochs(10),
 			optimizer.WithBatchSize(32),
 			optimizer.WithClassification(),
 			optimizer.WithTrainDataProvider(trainDataProvider),
 			optimizer.WithTestDataProvider(testDataProvider),
-			optimizer.WithSampler(optimizer.NewRS2Sampler[int](0.20)),
+			optimizer.WithSampler(optimizer.NewRS2Sampler[int](0.10)),
+			optimizer.WithRegularizationFactor(5e-5),
+			optimizer.WithLoggingInterval(30),
+			optimizer.WithLearningRate(0.02),
+			optimizer.WithLearningRateDecay(0.0001),
+			optimizer.WithWeightsDir("../../weights/cnn"),
+			optimizer.WithLoadModelWeights(),
+			optimizer.WithSaveFinalWeights(),
+			optimizer.WithCheckpoints(20),
+			optimizer.WithMomentumCoefficient(0.9),
 		)
 
-		require.NoError(t, o.Run(network))
+		require.NoError(t, o.Run())
 	})
+}
 
+func TestLoadWeights(t *testing.T) {
+	network, err := cnn.New(cnn.Shape{1, 28, 28}, 10)
+	require.NoError(t, err)
+
+	_, _, X_test, _, err := mnist.LoadData()
+	require.NoError(t, err)
+
+	X_test = X_test[0:1000]
+
+	testOutput, err := network.Forward(X_test, true)
+	require.NoError(t, err)
+
+	parameters := network.Weights()
+
+	network, err = cnn.New(cnn.Shape{1, 28, 28}, 10)
+	require.NoError(t, err)
+
+	require.NoError(t, network.LoadWeights(parameters))
+
+	testOutputAfterLoad, err := network.Forward(X_test, true)
+	require.NoError(t, err)
+
+	for i, sample := range testOutputAfterLoad {
+		for j, elem := range sample {
+			require.Equal(t, testOutput[i][j], elem)
+		}
+	}
 }
 
 func TestIm2Col(t *testing.T) {
