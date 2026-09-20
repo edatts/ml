@@ -5,13 +5,13 @@ import (
 
 	"github.com/edatts/ml/pkg/cnn"
 	"github.com/edatts/ml/pkg/mnist"
+	"github.com/edatts/ml/pkg/model"
 	"github.com/edatts/ml/pkg/optimizer"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCNN(t *testing.T) {
-	network, err := cnn.New(cnn.Shape{1, 28, 28}, 10)
-	require.NoError(t, err)
+	network := newModel(t, cnn.Shape{1, 28, 28}, 10)
 
 	t.Run("mnist handwritten digits", func(t *testing.T) {
 		X_train, Y_train, X_test, Y_test, err := mnist.LoadData()
@@ -27,20 +27,16 @@ func TestCNN(t *testing.T) {
 
 		o := optimizer.New(
 			optimizer.WithModel(network),
-			optimizer.WithNumEpochs(10),
+			optimizer.WithNumEpochs(20),
 			optimizer.WithBatchSize(32),
 			optimizer.WithClassification(),
 			optimizer.WithTrainDataProvider(trainDataProvider),
 			optimizer.WithTestDataProvider(testDataProvider),
-			optimizer.WithSampler(optimizer.NewRS2Sampler[int](0.10)),
+			optimizer.WithSampler(optimizer.NewRS2Sampler[int](0.05)),
 			optimizer.WithRegularizationFactor(5e-5),
 			optimizer.WithLoggingInterval(30),
-			optimizer.WithLearningRate(0.02),
-			optimizer.WithLearningRateDecay(0.0001),
-			optimizer.WithWeightsDir("../../weights/cnn"),
-			optimizer.WithLoadModelWeights(),
-			optimizer.WithSaveFinalWeights(),
-			optimizer.WithCheckpoints(20),
+			optimizer.WithLearningRate(0.05),
+			optimizer.WithLearningRateDecay(0.00075),
 			optimizer.WithMomentumCoefficient(0.9),
 		)
 
@@ -49,8 +45,7 @@ func TestCNN(t *testing.T) {
 }
 
 func TestLoadWeights(t *testing.T) {
-	network, err := cnn.New(cnn.Shape{1, 28, 28}, 10)
-	require.NoError(t, err)
+	network := newModel(t, cnn.Shape{1, 28, 28}, 10)
 
 	_, _, X_test, _, err := mnist.LoadData()
 	require.NoError(t, err)
@@ -62,8 +57,7 @@ func TestLoadWeights(t *testing.T) {
 
 	parameters := network.Weights()
 
-	network, err = cnn.New(cnn.Shape{1, 28, 28}, 10)
-	require.NoError(t, err)
+	network = newModel(t, cnn.Shape{1, 28, 28}, 10)
 
 	require.NoError(t, network.LoadWeights(parameters))
 
@@ -75,6 +69,24 @@ func TestLoadWeights(t *testing.T) {
 			require.Equal(t, testOutput[i][j], elem)
 		}
 	}
+}
+
+func newModel(t *testing.T, inputShape cnn.Shape, outputSize int) model.Model {
+	network, err := cnn.New(
+		inputShape,
+		outputSize,
+		cnn.WithConv2D(6, 8),
+		cnn.WithPool2D(),
+		cnn.WithDropout(0.1),
+		cnn.WithConv2D(3, 24),
+		cnn.WithPool2D(),
+		cnn.WithDropout(0.2),
+		cnn.WithFullyConnected(512),
+		cnn.WithDropout(0.5),
+	)
+	require.NoError(t, err)
+
+	return network
 }
 
 func TestIm2Col(t *testing.T) {

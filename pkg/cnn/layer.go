@@ -894,17 +894,20 @@ func (l *pool2D) Forward(_ bool) error {
 	var paddedShape = Shape{l.prev.Shape().Channels(), l.prev.Shape().Height() + l.P_h, l.prev.Shape().Width() + l.P_w}
 	var paddedStrides = paddedShape.Strides()
 	for n, sample := range l.prev.batch() {
-		var paddedData = make([]float32, paddedShape.Volume())
-		for i := 0; i < len(sample.data); i += 2 {
-			// Because we're only padding one row on the right and one row on
-			// the bottom the individual indices of the data elements remain
-			// the same, but the flat index increases by one for each row.
-			indices := strides.Indices(i)
-			idx := paddedStrides.FlatIndex(indices)
-			copy(paddedData[idx:idx+2], sample.data[i:i+2])
+		var data = sample.data
+
+		if l.P_h > 0 || l.P_w > 0 {
+			data = make([]float32, paddedShape.Volume())
+			for i := 0; i < len(sample.data); i += 2 {
+				// Because we're only padding one row on the right and one row on
+				// the bottom the individual indices of the data elements remain
+				// the same, but the flat index increases by one for each row.
+				indices := strides.Indices(i)
+				idx := paddedStrides.FlatIndex(indices)
+				copy(data[idx:idx+2], sample.data[i:i+2])
+			}
 		}
 
-		var data = sample.data
 		var outData = make([]float32, outLen*sample.Channels())
 		l.maxIndices[n] = make([]int, sample.Channels()*H_out*W_out)
 		for c := range sample.Channels() {
@@ -1058,7 +1061,7 @@ type fullyConnected struct {
 	batchSize int
 }
 
-func (c *CNN) newFullyConnected(numNeurons int, prev Layer) *fullyConnected {
+func (c *CNN) newFullyConnected(prev Layer, numNeurons int) *fullyConnected {
 	l := &fullyConnected{
 		name:  c.assignName("full"),
 		prev:  prev,
@@ -1267,7 +1270,7 @@ func (l *fullyConnected) loadParameters(tensor model.Tensor) error {
 
 func (c *CNN) newOutput(numOutputs int, prev Layer) *output {
 	return &output{
-		fullyConnected: c.newFullyConnected(numOutputs, prev),
+		fullyConnected: c.newFullyConnected(prev, numOutputs),
 		actFn:          SoftMax{},
 		shape:          [3]int{0, 0, numOutputs},
 	}

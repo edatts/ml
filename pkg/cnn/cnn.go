@@ -95,7 +95,41 @@ func (i Indices) W() int {
 	return i[2]
 }
 
-func New(inputShape Shape, outputSize int) (*CNN, error) {
+type Option func(*CNN)
+
+func WithConv2D(kernelSize, numKernels int) Option {
+	return func(c *CNN) {
+		prev := c.layers[len(c.layers)-1]
+		c.layers = append(c.layers, c.newConv2D(prev, kernelSize, numKernels))
+		fmt.Printf("After Conv: %+v\n", c.layers[len(c.layers)-1].Shape())
+	}
+}
+
+func WithPool2D() Option {
+	return func(c *CNN) {
+		prev := c.layers[len(c.layers)-1]
+		c.layers = append(c.layers, c.newPool2D(prev))
+		fmt.Printf("After Pool: %+v\n", c.layers[len(c.layers)-1].Shape())
+	}
+}
+
+func WithDropout(dropoutRatio float64) Option {
+	return func(c *CNN) {
+		prev := c.layers[len(c.layers)-1]
+		c.layers = append(c.layers, c.newDropout(prev, dropoutRatio))
+		fmt.Printf("After Dropout: %+v\n", c.layers[len(c.layers)-1].Shape())
+	}
+}
+
+func WithFullyConnected(width int) Option {
+	return func(c *CNN) {
+		prev := c.layers[len(c.layers)-1]
+		c.layers = append(c.layers, c.newFullyConnected(prev, width))
+		fmt.Printf("After Fully Connected: %+v\n", c.layers[len(c.layers)-1].Shape())
+	}
+}
+
+func New(inputShape Shape, outputSize int, optFns ...Option) (*CNN, error) {
 	if inputShape.Channels() != 1 {
 		return nil, fmt.Errorf("only 1 input channel is currently supported")
 	}
@@ -111,47 +145,15 @@ func New(inputShape Shape, outputSize int) (*CNN, error) {
 	fmt.Printf("Input Shape: %+v\n", x.Shape())
 	c.layers = append(c.layers, x)
 
-	x = c.newConv2D(x, 5, 16)
-	fmt.Printf("After Conv: %+v\n", x.Shape())
-	c.layers = append(c.layers, x)
+	if len(optFns) == 0 {
+		return nil, fmt.Errorf("no layers provided")
+	}
 
-	x = c.newConv2D(x, 5, 32)
-	fmt.Printf("After Conv: %+v\n", x.Shape())
-	c.layers = append(c.layers, x)
+	for _, fn := range optFns {
+		fn(c)
+	}
 
-	x = c.newPool2D(x)
-	fmt.Printf("After Pool: %+v\n", x.Shape())
-	c.layers = append(c.layers, x)
-
-	x = c.newDropout(x, 0.1)
-	fmt.Printf("After Dropout: %+v\n", x.Shape())
-	c.layers = append(c.layers, x)
-
-	x = c.newConv2D(x, 3, 64)
-	fmt.Printf("After Conv: %+v\n", x.Shape())
-	c.layers = append(c.layers, x)
-
-	x = c.newConv2D(x, 3, 128)
-	fmt.Printf("After Conv: %+v\n", x.Shape())
-	c.layers = append(c.layers, x)
-
-	x = c.newPool2D(x)
-	fmt.Printf("After Pool: %+v\n", x.Shape())
-	c.layers = append(c.layers, x)
-
-	x = c.newDropout(x, 0.2)
-	fmt.Printf("After Dropout: %+v\n", x.Shape())
-	c.layers = append(c.layers, x)
-
-	x = c.newFullyConnected(512, x)
-	fmt.Printf("After Full: %+v\n", x.Shape())
-	c.layers = append(c.layers, x)
-
-	x = c.newDropout(x, 0.5)
-	fmt.Printf("After Dropout: %+v\n", x.Shape())
-	c.layers = append(c.layers, x)
-
-	out := c.newOutput(outputSize, x)
+	out := c.newOutput(outputSize, c.layers[len(c.layers)-1])
 	fmt.Printf("After Out: %+v\n", out.Shape())
 	c.layers = append(c.layers, out)
 
