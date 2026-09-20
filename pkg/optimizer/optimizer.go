@@ -11,9 +11,9 @@ import (
 // to easily run inference with Classify() and Regress(). It might be better to
 // have the optimizer as component of the model...
 type Optimizer interface {
-	Run(model.Model) error
-	Classify(inputs [][]float32, targets [][]int) (outputs [][]float32, grads [][]float32, accuracy float64, regLoss float64, err error)
-	Regress(inputs [][]float32, targets [][]float32) (outputs [][]float32, grads [][]float32, loss float64, regLoss float64, err error)
+	Run() error
+	Classify(inputs [][]float32, targets [][]int, isTest bool) (outputs [][]float32, grads [][]float32, accuracy float64, regLoss float64, err error)
+	Regress(inputs [][]float32, targets [][]float32, isTest bool) (outputs [][]float32, grads [][]float32, loss float64, regLoss float64, err error)
 }
 
 type dataProvider func() ([][]float32, any, error)
@@ -43,12 +43,12 @@ func New(optFns ...option) Optimizer {
 	return o
 }
 
-func (o *optimizer) Run(model model.Model) error {
+func (o *optimizer) Run() error {
 	if o.currentRun != nil {
 		return ErrRunInProgress
 	}
 
-	if model == nil {
+	if o.model == nil {
 		return ErrNoModel
 	}
 
@@ -64,7 +64,12 @@ func (o *optimizer) Run(model model.Model) error {
 		return fmt.Errorf("test data: %w", ErrNoDataProvider)
 	}
 
-	o.model = model
+	// Load the weights from file.
+	if o.cfg.loadModelWeights {
+		if err := o.loadWeights(); err != nil {
+			return fmt.Errorf("failed loading weights: %w", err)
+		}
+	}
 
 	if err := o.sampler.Init(o.cfg.batchSize, o.trainDataProvider); err != nil {
 		return fmt.Errorf("failed initializing sampler: %w", err)
@@ -78,10 +83,6 @@ func (o *optimizer) Run(model model.Model) error {
 
 	if err := o.test(); err != nil {
 		return fmt.Errorf("failed testing: %w", err)
-	}
-
-	if err := o.saveWeights(); err != nil {
-		return fmt.Errorf("failed saving weights: %w", err)
 	}
 
 	return nil
@@ -103,14 +104,22 @@ func (o *optimizer) train() error {
 		if err := o.sampler.Err(); err != nil {
 			return fmt.Errorf("failed sampling: %w", err)
 		}
+
+		if o.cfg.checkpointInterval != 0 && epoch%o.cfg.checkpointInterval == 0 {
+			slog.Info("checkpoint reached, saving model weights", "epoch", epoch)
+			if err := o.saveWeights(); err != nil {
+				return fmt.Errorf("failed checkpointing weights: %w", err)
+			}
+		}
 	}
 
 	slog.Info("maximum number of epochs reached, finished training")
 
-	// TODO: Write the model to disk. Add configuration for storage directory.
-	// if err := o.persistModel(); err != nil {
-	// 	return fmt.Errorf("failed persisting model: %w", err)
-	// }
+	if o.cfg.saveFinalWeights {
+		if err := o.saveWeights(); err != nil {
+			return fmt.Errorf("failed saving weights: %w", err)
+		}
+	}
 
 	return nil
 }
@@ -150,8 +159,8 @@ func (o *optimizer) initTrainingRun() error {
 	return nil
 }
 
-func (o *optimizer) Classify(inputs [][]float32, targets [][]int) ([][]float32, [][]float32, float64, float64, error) {
-	outputs, err := o.model.Forward(inputs)
+func (o *optimizer) Classify(inputs [][]float32, targets [][]int, isTest bool) ([][]float32, [][]float32, float64, float64, error) {
+	outputs, err := o.model.Forward(inputs, isTest)
 	if err != nil {
 		return nil, nil, 0, 0, fmt.Errorf("failed forward pass: %w", err)
 	}
@@ -179,8 +188,8 @@ func (o *optimizer) Classify(inputs [][]float32, targets [][]int) ([][]float32, 
 	return outputs, dCdA, Accuracy(outputs, targets), loss + l2Reg, nil
 }
 
-func (o *optimizer) Regress(inputs [][]float32, targets [][]float32) ([][]float32, [][]float32, float64, float64, error) {
-	outputs, err := o.model.Forward(inputs)
+func (o *optimizer) Regress(inputs [][]float32, targets [][]float32, isTest bool) ([][]float32, [][]float32, float64, float64, error) {
+	outputs, err := o.model.Forward(inputs, isTest)
 	if err != nil {
 		return nil, nil, 0, 0, fmt.Errorf("failed forward pass: %w", err)
 	}
@@ -217,7 +226,7 @@ func (o *optimizer) test() error {
 			return fmt.Errorf("failed asserting test targets to [][]int, type of data is %T", Y)
 		}
 
-		_, _, acc, loss, err := o.Classify(X, targets)
+		_, _, acc, loss, err := o.Classify(X, targets, true)
 		if err != nil {
 			return fmt.Errorf("failed classifying: %w", err)
 		}
@@ -231,22 +240,11 @@ func (o *optimizer) test() error {
 		return fmt.Errorf("failed asserting test targets to [][]int, type of data is %T", Y)
 	}
 
-	_, _, loss, regLoss, err := o.Regress(X, targets)
+	_, _, loss, regLoss, err := o.Regress(X, targets, true)
 	if err != nil {
 		return fmt.Errorf("failed classifying: %w", err)
 	}
 
 	slog.Info("test results", "loss", loss, "regLoss", regLoss)
-	return nil
-}
-
-func (o *optimizer) saveWeights() error {
-	if !o.cfg.saveWeights {
-		return nil
-	}
-
-	// Write weights to disk. What format? Where on disk?
-	slog.Warn("saveWeights is unimplemented")
-
 	return nil
 }

@@ -56,7 +56,9 @@ func (c *ClassificationRun) Step() error {
 		return err
 	}
 
-	_, dCdA, acc, regLoss, err := c.optimizer.Classify(batch.Inputs, batch.Targets)
+	// t := time.Now()
+
+	_, dCdA, acc, regLoss, err := c.optimizer.Classify(batch.Inputs, batch.Targets, false)
 	if err != nil {
 		return fmt.Errorf("failed classifying: %w", err)
 	}
@@ -72,9 +74,30 @@ func (c *ClassificationRun) Step() error {
 	}
 
 	// Backpropagate
-	if err := c.optimizer.model.Backward(dCdA, c.currentLearningRate, c.optimizer.cfg.lambda); err != nil {
+	if err := c.optimizer.model.Backward(
+		dCdA,
+		c.currentLearningRate,
+		c.optimizer.cfg.lambda,
+		c.optimizer.cfg.momentumCoefficient,
+	); err != nil {
 		return fmt.Errorf("failed backpropagating: %w", err)
 	}
+
+	// Recent values pre-optimization:
+	//	- Batch Size 64: 0.4304s
+	// 	- Batch Size 128: 0.8735s
+	//
+	// After applying Im2Col to kernels once in backprop:
+	//	- Batch Size 64: 0.1103s
+	// 	- Batch Size 128: 0.2250s
+	//
+	// After adding some parallelization:
+	//	- Batch Size 64: 0.0426s
+	// 	- Batch Size 128: 0.0833s
+	//
+	// if c.numBatches%c.optimizer.cfg.trainLogWindow == 0 {
+	// 	slog.Info("time to process batch", "batchSize", len(batch.Inputs), "timeInSeconds", time.Since(t).Seconds())
+	// }
 
 	c.currentLearningRate *= (1 - c.lrDecay)
 	return nil
@@ -88,11 +111,11 @@ func (c *ClassificationRun) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.Any("epoch", c.epoch),
 		slog.Any("batchNum", c.numBatches),
-		slog.Any("lr", c.currentLearningRate),
+		slog.Any("lr", fmt.Sprintf("%.6f", c.currentLearningRate)),
 		// slog.Any("lastAccuracy", c.lastAccuracy),
-		slog.Any("epochAccuracy", c.accuracySum/float64(c.epochBatches)),
+		slog.Any("epochAccuracy", fmt.Sprintf("%.6f", c.accuracySum/float64(c.epochBatches))),
 		// slog.Any("lastRegLoss", c.lastRegLoss),
-		slog.Any("epochRegLoss", c.regLossSum/float64(c.epochBatches)),
+		slog.Any("epochRegLoss", fmt.Sprintf("%.6f", c.regLossSum/float64(c.epochBatches))),
 	)
 }
 
@@ -132,7 +155,7 @@ func (r *RegressionRun) Step() error {
 		return err
 	}
 
-	_, dCdA, loss, regLoss, err := r.optimizer.Regress(batch.Inputs, batch.Targets)
+	_, dCdA, loss, regLoss, err := r.optimizer.Regress(batch.Inputs, batch.Targets, false)
 	if err != nil {
 		return fmt.Errorf("failed regressing: %w", err)
 	}
@@ -148,7 +171,12 @@ func (r *RegressionRun) Step() error {
 	}
 
 	// Backpropagate
-	if err := r.optimizer.model.Backward(dCdA, r.currentLearningRate, r.optimizer.cfg.lambda); err != nil {
+	if err := r.optimizer.model.Backward(
+		dCdA,
+		r.currentLearningRate,
+		r.optimizer.cfg.lambda,
+		r.optimizer.cfg.momentumCoefficient,
+	); err != nil {
 		return fmt.Errorf("failed backpropagating: %w", err)
 	}
 
