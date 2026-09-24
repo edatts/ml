@@ -9,13 +9,13 @@ TEXT ·DotMatChunk8(SB),NOSPLIT,$0-144
     // matrix rows, and out is a slice of the corresponding output row.
 
     // Move our slice pointers into their own registers
-    MOVD A1w+0(FP), R0
+    MOVD A1+0(FP), R0
     MOVD B1+24(FP), R1
     MOVD B2+48(FP), R2
     MOVD B3+72(FP), R3
     MOVD B4+96(FP), R4
     MOVD out+120(FP), R5
-    
+
     // Load our vector registers
     VLD1 (R0), [V0.S4]
     VLD1 (R1), [V1.S4, V2.S4]
@@ -24,11 +24,20 @@ TEXT ·DotMatChunk8(SB),NOSPLIT,$0-144
     VLD1 (R4), [V7.S4, V8.S4]
     VLD1 (R5), [V9.S4, V10.S4]
 
+    // Go ASM reverses the order of most instructions. For the first
+    // FMLA instruction the literal instruction would be:
+    //
+    //  fmla v9.4s, v1.4s, v0.s[0]
+    //
+    // Which, in Go ASM, becomes:
+    //
+    //  VFMLA V0.S[0], V1.S4, V9.S4
+    //
     WORD $0x4F801029 // VFMLA V0.S[0], V1.S4, V9.S4
     WORD $0x4FA01069 // VFMLA V0.S[1], V3.S4, V9.S4
     WORD $0x4F8018A9 // VFMLA V0.S[2], V5.S4, V9.S4
     WORD $0x4FA018E9 // VFMLA V0.S[3], V7.S4, V9.S4
-
+    
     WORD $0x4F80104A // VFMLA V0.S[0], V2.S4, V10.S4
     WORD $0x4FA0108A // VFMLA V0.S[1], V4.S4, V10.S4
     WORD $0x4F8018CA // VFMLA V0.S[2], V6.S4, V10.S4
@@ -41,7 +50,7 @@ TEXT ·DotMatChunk8(SB),NOSPLIT,$0-144
 // func DotMatChunk4(A1, B1, B2, B3, B4, out []float32)
 TEXT ·DotMatChunk4(SB),NOSPLIT,$0-144
     // Move our slice pointers into their own registers
-    MOVD A1w+0(FP), R0
+    MOVD A1+0(FP), R0
     MOVD B1+24(FP), R1
     MOVD B2+48(FP), R2
     MOVD B3+72(FP), R3
