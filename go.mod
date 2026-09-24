@@ -7,6 +7,7 @@ require (
 	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/gjson v1.19.0
+	github.com/x448/float16 v0.8.4
 	golang.org/x/sync v0.23.0
 	gonum.org/v1/gonum v0.16.0
 )
