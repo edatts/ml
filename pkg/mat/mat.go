@@ -185,6 +185,7 @@ func (m *Matrix) Mul(A, B *Matrix) error {
 			// have any out of bounds array accesses. Any remaining elements are
 			// handled in separate loops after the chunking loops.
 			for j := 0; j < AQuotient; j++ {
+				var BRem = BRemainder
 				var A1 = row[(j * 4) : (j*4)+4]
 				for k := 0; k < BQuotient && BN >= 8; k++ {
 					// slog.Info("indices", "j", j*4, "k", k*4)
@@ -199,13 +200,12 @@ func (m *Matrix) Mul(A, B *Matrix) error {
 					// additions for each chunk, the results are accumulated in the
 					// output slice in an additive fashion.
 					DotMatChunk8(A1, B1, B2, B3, B4, outRow[kIdx:kIdx+8])
-
 				}
 
 				// If remainder is >= 4 then process a 4 x 4 chunk here then add
 				// 4 to the start index of the remainder loop.
 				var extraIndex int
-				if BRemainder >= 4 {
+				if BRem >= 4 {
 					k := BQuotient * 8
 					chunkIdx := k + ((j * 4) * BN)
 					B1 := B.data[chunkIdx+(0*BN) : chunkIdx+(0*BN)+4]
