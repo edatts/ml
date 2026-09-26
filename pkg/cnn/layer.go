@@ -315,28 +315,6 @@ func (l *conv2D) getdCdZMatrix(dCdZ []float32) (*mat.Matrix, error) {
 		return nil, fmt.Errorf("failed instantiating activation derivative matrix: %w", err)
 	}
 
-	// for i := range dCdZ {
-	// 	for j := range l.prev.Shape().Channels() {
-	// 		copy(dCdZMatrixData[(i*numCols)+(j*derivLen):(i*numCols)+(j*derivLen)+derivLen], dCdZ[i*derivLen:i*derivLen+derivLen])
-	// 	}
-	// }
-
-	// derivLen := l.prev.Shape().Height() * l.prev.Shape().Width()
-	// numCols := derivLen * l.prev.Shape().Channels()
-	// var dCdZMatrixData = make([]float32, l.shape.Channels()*numCols)
-	// for i := range dCdZ {
-	// 	for j := range l.prev.Shape().Channels() {
-	// 		copy(dCdZMatrixData[(i*numCols)+(j*derivLen):(i*numCols)+(j*derivLen)+derivLen], dCdZ[i*derivLen:i*derivLen+derivLen])
-	// 	}
-	// }
-
-	// dCdZMatrix, err := mat.NewFromData(l.shape.Channels(), numCols, dCdZMatrixData)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("failed instantiating activation derivative matrix: %w", err)
-	// }
-
-	// slog.Info("dCdz matrix data", "data", dCdZMatrixData)
-
 	return dCdZMatrix, nil
 }
 
@@ -658,48 +636,6 @@ func (l *conv2D) Backward() error {
 			}
 			return nil
 		})
-
-		// // weightMatrix := mat.New(dCdWMatrix.NumRows(), dCdWMatrix.NumCols())
-		// // for i, k := range l.kernels {
-		// // 	for j, weight := range k.weights {
-		// // 		weightMatrix.Data()[(len(k.weights)*i)+j] = weight
-		// // 	}
-		// // }
-
-		// dCdZSample, err := NewSampleFromData(l.shape, l.dCdZ[i].data)
-		// if err != nil {
-		// 	return fmt.Errorf("failed getting sample from dCdZ data: %w", err)
-		// }
-
-		// dCdZIm2Col, err := dCdZSample.Im2Col(l.stride, 1, 1, false)
-		// if err != nil {
-		// 	return fmt.Errorf("failed applying Im2Col to dCdZ sample: %w", err)
-		// }
-
-		// slog.Info("dCdZ Im2Col", "rows", dCdZIm2Col.NumRows(), "cols", dCdZIm2Col.NumRows())
-
-		// slog.Info("dCdZ", "rows", dCdZMatrix.NumRows(), "cols", dCdZMatrix.NumCols())
-		// slog.Info("kernelMatrix", "rows", kernelMatrix.NumRows(), "cols", kernelMatrix.NumCols())
-		// // slog.Info("weight matrix", "rows", weightMatrix.NumRows(), "cols", weightMatrix.NumCols())
-		// slog.Info("prev acts", "shape", l.prev.activationDeltas()[0].Shape)
-
-		// // Logit grads shape: (256, 1, 1)
-		// // Weights shape: (256, 3, 3)
-		// // Prev acts shape: (128, 3, 3)
-
-		// dCdAMatrix := mat.New(dCdZMatrix.NumRows(), kernelMatrix.NumRows())
-		// if err := dCdAMatrix.Mul(dCdZMatrix, kernelMatrix.Transpose()); err != nil {
-		// 	// dCdAMatrix := mat.New(weightMatrix.NumCols(), dCdZMatrix.NumCols())
-		// 	// if err := dCdAMatrix.Mul(weightMatrix.Transpose(), dCdZMatrix); err != nil {
-		// 	return fmt.Errorf("failed multiplying dCdz and transpose weights: %w", err)
-		// }
-
-		// prevActDeltas, err := NewSampleFromData(l.prev.Shape(), dCdAMatrix.Data())
-		// if err != nil {
-		// 	return fmt.Errorf("failed instantiating prev layers activation delta sample: %w", err)
-		// }
-
-		// l.prev.activationDeltas()[i] = prevActDeltas
 	}
 
 	return eg.Wait()
@@ -821,15 +757,11 @@ func (c *CNN) newPool2D(prev Layer) *pool2D {
 		// Going to have to use padding...
 		slog.Warn("pool2d incompatible height, adding height padding...")
 		P_h = 1
-		// slog.Error("input shape is not compatible with pooling parameters", "inputShape", prev.Shape(), "poolingWindow", 2, "poolingStride", 2)
-		// panic("input height is not compatible with window size and stride of 2")
 	}
 
 	if prev.Shape().Width()%2 != 0 {
 		slog.Warn("pool2d incompatible width, adding width padding...")
 		P_w = 1
-		// slog.Error("input shape is not compatible with pooling parameters", "inputShape", prev.Shape(), "poolingWindow", 2, "poolingStride", 2)
-		// panic("input width is not compatible with window size and stride of 2")
 	}
 
 	// H_out = floor((H−K1+2P)/S)+1
@@ -864,7 +796,6 @@ func (l *pool2D) init(batchSize int) {
 }
 
 // TODO: Tests for forward pass shape and values...
-// TODO: Review padding and formula for output size...
 func (l *pool2D) Forward(_ bool) error {
 	// The forward pass of the pooling layer calculates the max value for
 	// a particular area of each input channels. It operates individually
@@ -884,11 +815,7 @@ func (l *pool2D) Forward(_ bool) error {
 	W_in := l.prev.Shape().Width()
 	H_out := ((H_in - l.windowSize + l.P_h) / l.windowSize) + 1
 	W_out := ((W_in - l.windowSize + l.P_w) / l.windowSize) + 1
-	// imageLen := H_in * W_in
-	// paddedLen := (H_in + l.P_h) * (W_in + l.P_w)
 	outLen := H_out * W_out
-
-	// slog.Info("dims", "H_in", H_in, "paddedLen", paddedLen)
 
 	var strides = l.prev.Shape().Strides()
 	var paddedShape = shape.New(l.prev.Shape().Channels(), l.prev.Shape().Height()+l.P_h, l.prev.Shape().Width()+l.P_w)
@@ -934,24 +861,6 @@ func (l *pool2D) Forward(_ bool) error {
 			}
 		}
 
-		// var outData = make([]float32, outLen*sample.Channels())
-		// l.maxIndices[n] = []int{}
-		// for m := range sample.Channels() {
-		// 	image := l.padImage(paddedLen, sample.data[m*imageLen:m*imageLen+imageLen])
-		// 	for i := range H_out {
-		// 		for j := range W_out {
-		// 			var chunk []float32
-		// 			for k := range l.windowSize {
-		// 				chunk = append(chunk, image[(i*W_in)+(k*W_in)+j:(i*W_in)+(k*W_in)+j+l.windowSize]...)
-		// 			}
-		// 			maximum := slices.Max(chunk)
-		// 			maxIdx := slices.Index(image, maximum) + m*imageLen
-		// 			outData[(m*outLen)+(i*H_out)+j] = maximum
-		// 			l.maxIndices[n] = append(l.maxIndices[n], maxIdx)
-		// 		}
-		// 	}
-		// }
-
 		outSample, err := NewSampleFromData(shape.New(sample.Channels(), H_out, W_out), outData)
 		if err != nil {
 			return fmt.Errorf("failed instantiting new output sample: %w", err)
@@ -961,23 +870,6 @@ func (l *pool2D) Forward(_ bool) error {
 
 	return nil
 }
-
-// TODO: Write test for padImage...
-// func (l *pool2D) padImage(paddedLen int, data []float32) []float32 {
-// 	if paddedLen == len(data) {
-// 		return data
-// 	}
-
-// 	var out = make([]float32, paddedLen)
-// 	var x int
-// 	for i, datum := range data {
-// 		out[i+x] = datum
-// 		if (i+1)%l.prev.Shape().Width() == 0 {
-// 			x++
-// 		}
-// 	}
-// 	return out
-// }
 
 func (l *pool2D) Backward() error {
 	// In the backward pass there are no learnable parameters in this layer
