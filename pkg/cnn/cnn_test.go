@@ -7,11 +7,12 @@ import (
 	"github.com/edatts/ml/pkg/mnist"
 	"github.com/edatts/ml/pkg/model"
 	"github.com/edatts/ml/pkg/optimizer"
+	"github.com/edatts/ml/pkg/shape"
 	"github.com/stretchr/testify/require"
 )
 
 func TestCNN(t *testing.T) {
-	network := newModel(t, cnn.Shape{1, 28, 28}, 10)
+	network := newModel(t, shape.New(1, 28, 28), 10)
 
 	t.Run("mnist handwritten digits", func(t *testing.T) {
 		X_train, Y_train, X_test, Y_test, err := mnist.LoadData()
@@ -45,7 +46,7 @@ func TestCNN(t *testing.T) {
 }
 
 func TestLoadWeights(t *testing.T) {
-	network := newModel(t, cnn.Shape{1, 28, 28}, 10)
+	network := newModel(t, shape.New(1, 28, 28), 10)
 
 	_, _, X_test, _, err := mnist.LoadData()
 	require.NoError(t, err)
@@ -57,7 +58,7 @@ func TestLoadWeights(t *testing.T) {
 
 	parameters := network.Weights()
 
-	network = newModel(t, cnn.Shape{1, 28, 28}, 10)
+	network = newModel(t, shape.New(1, 28, 28), 10)
 
 	require.NoError(t, network.LoadWeights(parameters))
 
@@ -71,7 +72,7 @@ func TestLoadWeights(t *testing.T) {
 	}
 }
 
-func newModel(t *testing.T, inputShape cnn.Shape, outputSize int) model.Model {
+func newModel(t *testing.T, inputShape shape.Shape, outputSize int) model.Model {
 	network, err := cnn.New(
 		inputShape,
 		outputSize,
@@ -92,7 +93,7 @@ func newModel(t *testing.T, inputShape cnn.Shape, outputSize int) model.Model {
 func TestIm2Col(t *testing.T) {
 
 	t.Run("valid padding 3D kernel", func(t *testing.T) {
-		s, err := cnn.NewSampleFromData(cnn.Shape{3, 4, 4}, data3x4x4)
+		s, err := cnn.NewSampleFromData(shape.New(3, 4, 4), data3x4x4)
 		require.NoError(t, err)
 
 		sampleMatrix, err := s.Im2Col(1, 3, 3, cnn.Valid, false)
@@ -107,7 +108,7 @@ func TestIm2Col(t *testing.T) {
 	})
 
 	t.Run("valid padding 2D kernel", func(t *testing.T) {
-		s, err := cnn.NewSampleFromData(cnn.Shape{3, 4, 4}, data3x4x4)
+		s, err := cnn.NewSampleFromData(shape.New(3, 4, 4), data3x4x4)
 		require.NoError(t, err)
 
 		sampleMatrix, err := s.Im2Col(1, 3, 3, cnn.Valid, true)
@@ -122,7 +123,7 @@ func TestIm2Col(t *testing.T) {
 	})
 
 	t.Run("same padding", func(t *testing.T) {
-		s, err := cnn.NewSampleFromData(cnn.Shape{3, 4, 4}, data3x4x4)
+		s, err := cnn.NewSampleFromData(shape.New(3, 4, 4), data3x4x4)
 		require.NoError(t, err)
 
 		sampleMatrix, err := s.Im2Col(1, 3, 3, cnn.Same, false)
@@ -137,7 +138,7 @@ func TestIm2Col(t *testing.T) {
 	})
 
 	t.Run("full padding", func(t *testing.T) {
-		s, err := cnn.NewSampleFromData(cnn.Shape{3, 2, 2}, data3x2x2)
+		s, err := cnn.NewSampleFromData(shape.New(3, 2, 2), data3x2x2)
 		require.NoError(t, err)
 
 		sampleMatrix, err := s.Im2Col(1, 3, 3, cnn.Full, false)

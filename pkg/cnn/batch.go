@@ -1,24 +1,26 @@
 package cnn
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/edatts/ml/pkg/mat"
+	"github.com/edatts/ml/pkg/shape"
 )
 
 type Sample struct {
 	data []float32 // The dimensons (H, W C) are all flattened into the data slice.
-	Shape
+	shape.Shape
 }
 
-func NewSample(shape Shape) Sample {
+func NewSample(shape shape.Shape) Sample {
 	return Sample{
 		data:  make([]float32, shape.Height()*shape.Width()*shape.Channels()),
 		Shape: shape,
 	}
 }
 
-func NewSampleFromData(shape Shape, data []float32) (Sample, error) {
+func NewSampleFromData(shape shape.Shape, data []float32) (Sample, error) {
 	if len(data) != shape.Height()*shape.Width()*shape.Channels() {
 		return Sample{}, fmt.Errorf("data is not compatible with provided shape, len(data)=%d, shape=%v", len(data), shape)
 	}
@@ -29,7 +31,7 @@ func NewSampleFromData(shape Shape, data []float32) (Sample, error) {
 	}, nil
 }
 
-func NewBatch(batchSize int, sampleShape Shape) []Sample {
+func NewBatch(batchSize int, sampleShape shape.Shape) []Sample {
 	var out = make([]Sample, batchSize)
 	for i := range batchSize {
 		out[i] = NewSample(sampleShape)
@@ -49,7 +51,7 @@ func NewBatch(batchSize int, sampleShape Shape) []Sample {
 // Note that the provided shape is the shape of the Sample not the
 // shape of the batch. This might change later if we implement a
 // proper batch type.
-func NewBatchFromMatrix(shape Shape, matrix *mat.Matrix) ([]Sample, error) {
+func NewBatchFromMatrix(shape shape.Shape, matrix *mat.Matrix) ([]Sample, error) {
 	if matrix == nil {
 		return nil, fmt.Errorf("nil matrix provided")
 	}
@@ -70,7 +72,7 @@ func NewBatchFromMatrix(shape Shape, matrix *mat.Matrix) ([]Sample, error) {
 	return out, nil
 }
 
-func NewBatchFromSlices(shape Shape, slices [][]float32) ([]Sample, error) {
+func NewBatchFromSlices(shape shape.Shape, slices [][]float32) ([]Sample, error) {
 	if slices == nil {
 		return nil, fmt.Errorf("input slice is nil")
 	}
@@ -111,7 +113,7 @@ func (s Sample) ApplyActivation(actFn func(float32) float32) Sample {
 }
 
 func (s Sample) Hadamard(s2 Sample) (Sample, error) {
-	if s.Shape != s2.Shape {
+	if !bytes.Equal(s.Shape.Bytes(), s2.Shape.Bytes()) {
 		return Sample{}, fmt.Errorf("samples are incompatible shapes for hadamard product")
 	}
 
@@ -334,7 +336,7 @@ func (s Sample) Im2Col(stride, kernelHeight, kernelWidth int, padding Padding, p
 		// Current length of data is H_in * W_in * numChannels, the length of
 		// the padded data is (H_in+P_h) * (W_in+P_w) * numChannels.
 		var strides = s.Shape.Strides()
-		var paddedStrides = Shape{s.Channels(), s.Height() + P_h, s.Width() + P_w}.Strides()
+		var paddedStrides = shape.New(s.Channels(), s.Height()+P_h, s.Width()+P_w).Strides()
 		var paddedData = make([]float32, (s.Height()+P_h)*(s.Width()+P_w)*s.Channels())
 		for i := 0; i < len(s.data); i += s.Width() {
 			// Copy the data into the new slice, transforming the original
@@ -344,9 +346,9 @@ func (s Sample) Im2Col(stride, kernelHeight, kernelWidth int, padding Padding, p
 			// Idx_wp = Idx_w + P_w / 2
 			//
 			indices := strides.Indices(i)
-			indices[1] = indices.H() + P_t
-			indices[2] = indices.W() + P_l
-			idx := paddedStrides.FlatIndex(indices)
+			indices[1] = indices[1] + P_t
+			indices[2] = indices[2] + P_l
+			idx := paddedStrides.FlatIndex(indices...)
 
 			src := s.data[i : i+s.Width()]
 			copy(paddedData[idx:idx+s.Width()], src)

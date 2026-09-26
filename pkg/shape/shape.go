@@ -163,15 +163,16 @@ type Strides struct {
 	maxIdx int
 }
 
-func (s Strides) FlatIndex(indices []int) int {
+func (s Strides) FlatIndex(indices ...int) int {
 	if len(indices) != len(s.elems) {
 		panic(fmt.Sprintf("indices and strides are different lengths, indices=%d, striudes=%d", len(indices), len(s.elems)))
 	}
 
 	var out int
-	for i, elem := range s.elems {
-		out += int(elem * indices[i])
+	for i, idx := range indices {
+		out += int(s.elems[i] * idx)
 	}
+
 	return out
 }
 

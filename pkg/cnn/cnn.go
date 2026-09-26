@@ -1,18 +1,16 @@
 package cnn
 
 import (
+	"bytes"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"strings"
 
 	"github.com/edatts/ml/pkg/model"
+	"github.com/edatts/ml/pkg/shape"
 )
-
-// Here, in this package, we shall create functions for the instantiation
-// and training of convolutional neural networks.
 
 var _ model.Model = &CNN{}
 
@@ -21,78 +19,6 @@ type CNN struct {
 	layersByName map[string]Layer
 	layerCounts  map[layerType]int
 	identity     string
-}
-
-// TODO: Update Shape implementation to support tensors of varying rank.
-//
-// The shape takes into account height, width, and channels. We ignore
-// batch size for now but might include it later.
-type Shape [3]int
-
-func (s Shape) Channels() int {
-	return s[0]
-}
-
-func (s Shape) Height() int {
-	return s[1]
-}
-
-func (s Shape) Width() int {
-	return s[2]
-}
-
-func (s Shape) Volume() int {
-	return s[0] * s[1] * s[2]
-}
-
-func (s Shape) Strides() Strides {
-	return [3]int{s.Height() * s.Width(), s.Width(), 1}
-}
-
-func (s Shape) Bytes() []byte {
-	var b []byte
-	for _, n := range s {
-		if n != 0 {
-			b = binary.LittleEndian.AppendUint64(b, uint64(n))
-		}
-	}
-	return b
-}
-
-// Strides is a convenience type for converting flat indices into
-// tensor indices and vice-versa.
-//
-// If the tensor dimensions are powers of 2 (or can be padded to powers
-// of 2) then we can replace usage of pre-computed strides with usage
-// of bithsift and logical & operators.
-type Strides [3]int
-
-func (s Strides) FlatIndex(indices Indices) int {
-	return (indices[0] * s[0]) + (indices[1] * s[1]) + (indices[2] * s[2])
-}
-
-func (s Strides) Indices(idx int) Indices {
-	var indices [3]int
-	indices[0] = idx / s[0]
-	r := idx - (indices[0] * s[0])
-	indices[1] = r / s[1]
-	r = r - (indices[1] * s[1])
-	indices[2] = r // s[2] should always be 1 so we ignore it.
-	return indices
-}
-
-type Indices [3]int
-
-func (i Indices) C() int {
-	return i[0]
-}
-
-func (i Indices) H() int {
-	return i[1]
-}
-
-func (i Indices) W() int {
-	return i[2]
 }
 
 type Option func(*CNN)
@@ -129,7 +55,7 @@ func WithFullyConnected(width int) Option {
 	}
 }
 
-func New(inputShape Shape, outputSize int, optFns ...Option) (*CNN, error) {
+func New(inputShape shape.Shape, outputSize int, optFns ...Option) (*CNN, error) {
 	if inputShape.Channels() != 1 {
 		return nil, fmt.Errorf("only 1 input channel is currently supported")
 	}
@@ -194,7 +120,7 @@ func (c *CNN) Forward(inputs [][]float32, isTest bool) ([][]float32, error) {
 		return nil, fmt.Errorf("failed instantiating batch: %w", err)
 	}
 
-	if batch[0].Shape != c.inputLayer().Shape() {
+	if !bytes.Equal(batch[0].Shape.Bytes(), c.inputLayer().Shape().Bytes()) {
 		return nil, fmt.Errorf("invalid sample shape, sample=%v input=%v", batch[0].Shape, c.layers[0].Shape())
 	}
 

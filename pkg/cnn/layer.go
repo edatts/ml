@@ -11,6 +11,7 @@ import (
 
 	"github.com/edatts/ml/pkg/mat"
 	"github.com/edatts/ml/pkg/model"
+	"github.com/edatts/ml/pkg/shape"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -32,7 +33,7 @@ type Kernel struct {
 	bias float32
 	dCdB float32
 
-	shape Shape // Should enforce (size, size, len(input))
+	shape shape.Shape // Should enforce (size, size, len(input))
 	// size int // Only square for now
 }
 
@@ -52,7 +53,7 @@ type Layer interface {
 	// height, width) where channels starts off as the number of input channels (eg;
 	// 1 for greyscale and 3 for RGB) and becomes the number of kernels/filters
 	// after a pass through a convolutional later.
-	Shape() Shape
+	Shape() shape.Shape
 
 	Name() string
 	init(batchSize int)
@@ -73,7 +74,7 @@ type Layer interface {
 // 	Output
 // )
 
-// func (c *CNN) newLayer(lType LayerType, prev Layer, shape Shape) (Layer, error) {
+// func (c *CNN) newLayer(lType LayerType, prev Layer, shape shape.Shape) (Layer, error) {
 // 	switch lType {
 // 	case Input:
 // 		return &input{shape: shape}, nil
@@ -103,10 +104,10 @@ type input struct {
 	// acts  [][]float32
 	acts []Sample
 
-	shape Shape
+	shape shape.Shape
 }
 
-func (c *CNN) newInput(shape Shape) *input {
+func (c *CNN) newInput(shape shape.Shape) *input {
 	return &input{
 		name:  c.assignName("input"),
 		shape: shape,
@@ -124,7 +125,7 @@ func (l *input) Backward() error {
 // NoOp. Nothing to update in this layer...
 func (l *input) update(_, _, _ float64) {}
 
-func (l *input) Shape() Shape {
+func (l *input) Shape() shape.Shape {
 	return l.shape
 }
 
@@ -176,7 +177,7 @@ type conv2D struct {
 	kernels      []*Kernel
 	kernelMatrix *mat.Matrix
 
-	shape      Shape
+	shape      shape.Shape
 	kernelSize int // For now just support square kernels
 	stride     int // For now just support 1?
 	batchSize  int
@@ -205,7 +206,7 @@ func (c *CNN) newConv2D(prev Layer, kernelSize, numKernels int) *conv2D {
 		prev:  prev,
 		actFn: ReLU{},
 
-		shape:      Shape{numKernels, H_out, W_out},
+		shape:      shape.New(numKernels, H_out, W_out),
 		kernelSize: kernelSize,
 		stride:     1, // Only 1 for now
 	}
@@ -250,8 +251,7 @@ func (l *conv2D) initKernels() {
 			bias: float32(rand.NormFloat64() * 0.05),
 			dCdB: 0,
 
-			shape: [3]int{l.prev.Shape().Channels(), l.kernelSize, l.kernelSize},
-			// size: l.kernelSize,
+			shape: shape.New(l.prev.Shape().Channels(), l.kernelSize, l.kernelSize),
 		}
 
 		for j := range l.kernels[i].weights {
@@ -723,7 +723,7 @@ func (l *conv2D) update(lr, lambda, beta float64) {
 	}
 }
 
-func (l *conv2D) Shape() Shape {
+func (l *conv2D) Shape() shape.Shape {
 	return l.shape
 }
 
@@ -761,12 +761,12 @@ func (l *conv2D) parameters() map[string]model.Tensor {
 	return map[string]model.Tensor{
 		fmt.Sprintf("%s.weights", l.name): {
 			Name:  fmt.Sprintf("%s.weights", l.name),
-			Shape: model.Shape{l.shape.Channels(), l.prev.Shape().Channels(), l.kernelSize, l.kernelSize},
+			Shape: shape.New(l.shape.Channels(), l.prev.Shape().Channels(), l.kernelSize, l.kernelSize),
 			Data:  l.kernelMatrix.Data(), // This should only ever be nil briefly during Forward()...
 		},
 		fmt.Sprintf("%s.biases", l.name): {
 			Name:  fmt.Sprintf("%s.biases", l.name),
-			Shape: model.Shape{0, 0, 0, l.shape.Channels()},
+			Shape: shape.New(l.shape.Channels()),
 			Data:  l.biases(),
 		},
 	}
@@ -804,7 +804,7 @@ type pool2D struct {
 	P_h         int
 	P_w         int
 	windowSize  int // For now only square
-	shape       Shape
+	shape       shape.Shape
 	initialized bool
 	batchSize   int
 }
@@ -843,7 +843,7 @@ func (c *CNN) newPool2D(prev Layer) *pool2D {
 		windowSize: 2, // Window size is the same as stride...
 		P_h:        P_h,
 		P_w:        P_w,
-		shape:      Shape{prev.Shape().Channels(), H_out, W_out},
+		shape:      shape.New(prev.Shape().Channels(), H_out, W_out),
 	}
 }
 
@@ -891,7 +891,7 @@ func (l *pool2D) Forward(_ bool) error {
 	// slog.Info("dims", "H_in", H_in, "paddedLen", paddedLen)
 
 	var strides = l.prev.Shape().Strides()
-	var paddedShape = Shape{l.prev.Shape().Channels(), l.prev.Shape().Height() + l.P_h, l.prev.Shape().Width() + l.P_w}
+	var paddedShape = shape.New(l.prev.Shape().Channels(), l.prev.Shape().Height()+l.P_h, l.prev.Shape().Width()+l.P_w)
 	var paddedStrides = paddedShape.Strides()
 	for n, sample := range l.prev.batch() {
 		var data = sample.data
@@ -903,7 +903,7 @@ func (l *pool2D) Forward(_ bool) error {
 				// the bottom the individual indices of the data elements remain
 				// the same, but the flat index increases by one for each row.
 				indices := strides.Indices(i)
-				idx := paddedStrides.FlatIndex(indices)
+				idx := paddedStrides.FlatIndex(indices...)
 				copy(data[idx:idx+2], sample.data[i:i+2])
 			}
 		}
@@ -914,10 +914,10 @@ func (l *pool2D) Forward(_ bool) error {
 			for h := range H_out {
 				for w := range W_out {
 					s := l.windowSize // stride (only 2 for now)
-					idx_0 := paddedStrides.FlatIndex(Indices{c, h * s, w * s})
-					idx_1 := paddedStrides.FlatIndex(Indices{c, h * s, w*s + 1})
-					idx_2 := paddedStrides.FlatIndex(Indices{c, h*s + 1, w * s})
-					idx_3 := paddedStrides.FlatIndex(Indices{c, h*s + 1, w*s + 1})
+					idx_0 := paddedStrides.FlatIndex(c, h*s, w*s)
+					idx_1 := paddedStrides.FlatIndex(c, h*s, w*s+1)
+					idx_2 := paddedStrides.FlatIndex(c, h*s+1, w*s)
+					idx_3 := paddedStrides.FlatIndex(c, h*s+1, w*s+1)
 
 					maximum := max(data[idx_0], data[idx_1], data[idx_2], data[idx_3])
 					maxPaddedIdx := idx_0 + slices.Index(data[idx_0:idx_3+1], maximum)
@@ -925,9 +925,9 @@ func (l *pool2D) Forward(_ bool) error {
 					// Indices are the same for real data elements because we
 					// only pad the right and bottom.
 					maxPaddedIndices := paddedStrides.Indices(maxPaddedIdx)
-					maxIdx := strides.FlatIndex(maxPaddedIndices)
+					maxIdx := strides.FlatIndex(maxPaddedIndices...)
 
-					datumIdx := l.shape.Strides().FlatIndex(Indices{c, h, w})
+					datumIdx := l.shape.Strides().FlatIndex(c, h, w)
 					l.maxIndices[n][datumIdx] = maxIdx
 					outData[datumIdx] = maximum
 				}
@@ -952,7 +952,7 @@ func (l *pool2D) Forward(_ bool) error {
 		// 	}
 		// }
 
-		outSample, err := NewSampleFromData([3]int{sample.Channels(), H_out, W_out}, outData)
+		outSample, err := NewSampleFromData(shape.New(sample.Channels(), H_out, W_out), outData)
 		if err != nil {
 			return fmt.Errorf("failed instantiting new output sample: %w", err)
 		}
@@ -1006,7 +1006,7 @@ func (l *pool2D) Backward() error {
 // NoOp. Nothing to update in this layer...
 func (l *pool2D) update(_, _, _ float64) {}
 
-func (l *pool2D) Shape() Shape {
+func (l *pool2D) Shape() shape.Shape {
 	return l.shape
 }
 
@@ -1057,7 +1057,7 @@ type fullyConnected struct {
 	biases []float32
 	dCdB   []float32
 
-	shape     Shape
+	shape     shape.Shape
 	batchSize int
 }
 
@@ -1067,7 +1067,7 @@ func (c *CNN) newFullyConnected(prev Layer, numNeurons int) *fullyConnected {
 		prev:  prev,
 		actFn: ReLU{},
 
-		shape: [3]int{1, 1, numNeurons},
+		shape: shape.New(1, 1, numNeurons),
 	}
 
 	l.initWeights()
@@ -1211,7 +1211,7 @@ func (l *fullyConnected) update(lr, lambda, _ float64) {
 	}
 }
 
-func (l *fullyConnected) Shape() Shape {
+func (l *fullyConnected) Shape() shape.Shape {
 	return l.shape
 }
 
@@ -1239,12 +1239,12 @@ func (l *fullyConnected) parameters() map[string]model.Tensor {
 	return map[string]model.Tensor{
 		fmt.Sprintf("%s.weights", l.name): {
 			Name:  fmt.Sprintf("%s.weights", l.name),
-			Shape: model.Shape{0, 0, l.prev.Shape().Width(), l.shape.Width()},
+			Shape: shape.New(l.prev.Shape().Width(), l.shape.Width()),
 			Data:  l.weights.Data(),
 		},
 		fmt.Sprintf("%s.biases", l.name): {
 			Name:  fmt.Sprintf("%s.biases", l.name),
-			Shape: model.Shape{0, 0, 0, l.shape.Width()},
+			Shape: shape.New(l.shape.Width()),
 			Data:  l.biases,
 		},
 	}
@@ -1272,7 +1272,7 @@ func (c *CNN) newOutput(numOutputs int, prev Layer) *output {
 	return &output{
 		fullyConnected: c.newFullyConnected(prev, numOutputs),
 		actFn:          SoftMax{},
-		shape:          [3]int{0, 0, numOutputs},
+		shape:          shape.New(numOutputs),
 	}
 }
 
@@ -1281,7 +1281,7 @@ type output struct {
 
 	actFn SoftMax
 
-	shape Shape
+	shape shape.Shape
 }
 
 // This receiver overrides the one from the embedded fully connected layer
@@ -1302,7 +1302,7 @@ var _ Layer = &flatten{}
 type flatten struct {
 	name  string
 	prev  Layer
-	shape Shape
+	shape shape.Shape
 }
 
 func (c *CNN) newFlatten(prev Layer) *flatten {
@@ -1311,8 +1311,7 @@ func (c *CNN) newFlatten(prev Layer) *flatten {
 		name: c.assignName("flatten"),
 		prev: prev,
 
-		// TODO: Update Shape implementation to support variable rank...
-		shape: Shape{1, 1, numInputs},
+		shape: shape.New(1, 1, numInputs),
 	}
 }
 
@@ -1333,7 +1332,7 @@ func (l *flatten) Backward() error {
 
 func (l *flatten) update(_, _, _ float64) {}
 
-func (l *flatten) Shape() Shape {
+func (l *flatten) Shape() shape.Shape {
 	return l.shape
 }
 
@@ -1392,7 +1391,7 @@ type dropout struct {
 	dropoutMask []Sample
 	dCdA        []Sample
 
-	shape Shape
+	shape shape.Shape
 }
 
 func (c *CNN) newDropout(prev Layer, ratio float64) *dropout {
@@ -1459,7 +1458,7 @@ func (l *dropout) Backward() error {
 
 func (l *dropout) update(_, _, _ float64) {}
 
-func (l *dropout) Shape() Shape {
+func (l *dropout) Shape() shape.Shape {
 	return l.shape
 }
 
