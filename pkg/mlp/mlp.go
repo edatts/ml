@@ -65,11 +65,11 @@ func (m *MLP) outputLayer() Layer {
 }
 
 func (m *MLP) inputLen() int {
-	return int(m.inputLayer().width())
+	return m.inputLayer().Shape().Width()
 }
 
 func (m *MLP) outputLen() int {
-	return int(m.outputLayer().width())
+	return m.outputLayer().Shape().Width()
 }
 
 func (m *MLP) SumSquaredWeights() float64 {
@@ -172,20 +172,20 @@ func (m *MLP) LoadWeights(parameters []model.Tensor) error {
 		weights := parameters[i*2]
 		biases := parameters[i*2+1]
 
-		if l.prev.width() != weights.Shape.Height() {
-			return fmt.Errorf("invalid height for weights in learnable layer %d, expected %d, got %d", i, l.prev.width(), weights.Shape.Height())
+		if l.prev.Shape().Width() != weights.Shape.Height() {
+			return fmt.Errorf("invalid height for weights in learnable layer %d, expected %d, got %d", i, l.prev.Shape().Width(), weights.Shape.Height())
 		}
 
-		if l.width() != weights.Shape.Width() {
-			return fmt.Errorf("invalid width for weights in learnable layer %d, expected %d, got %d", i, l.width(), weights.Shape.Width())
+		if l.Shape().Width() != weights.Shape.Width() {
+			return fmt.Errorf("invalid width for weights in learnable layer %d, expected %d, got %d", i, l.Shape().Width(), weights.Shape.Width())
 		}
 
-		if l.width() != biases.Shape.Width() {
+		if l.Shape().Width() != biases.Shape.Width() {
 			return fmt.Errorf("invalid width for biases in learnable layer %d, expected %d, got %d", i, len(l.biases), biases.Shape.Width())
 		}
 
 		var err error
-		if l.weights, err = mat.NewFromData(l.prev.width(), l.width(), weights.Data); err != nil {
+		if l.weights, err = mat.NewFromData(l.prev.Shape().Width(), l.Shape().Width(), weights.Data); err != nil {
 			return fmt.Errorf("failed loading weights: %w", err)
 		}
 

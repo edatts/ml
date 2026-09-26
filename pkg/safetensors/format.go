@@ -7,6 +7,7 @@ import (
 	"math"
 
 	"github.com/edatts/ml/pkg/model"
+	"github.com/edatts/ml/pkg/shape"
 )
 
 // File format is SafeTensors:
@@ -36,7 +37,7 @@ type Header map[string]json.RawMessage
 
 type SafeTensorMetadata struct {
 	DataType string      `json:"dtype"`
-	Shape    model.Shape `json:"shape"`
+	Shape    shape.Shape `json:"shape"`
 	Offsets  [2]int      `json:"data_offsets"`
 }
 

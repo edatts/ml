@@ -6,18 +6,19 @@ import (
 
 	"github.com/edatts/ml/pkg/model"
 	"github.com/edatts/ml/pkg/optimizer/test"
+	"github.com/edatts/ml/pkg/shape"
 	"github.com/stretchr/testify/require"
 )
 
 var parameters = []model.Tensor{
 	{
 		Name:  "full.0.weights",
-		Shape: model.Shape{0, 0, 0, 9},
+		Shape: shape.New(9),
 		Data:  []float32{1, 2, 3, 4, 5, 4, 3, 2, 1},
 	},
 	{
 		Name:  "full.0.biases",
-		Shape: model.Shape{0, 0, 0, 3},
+		Shape: shape.New(3),
 		Data:  []float32{1, 2, 1},
 	},
 }
@@ -25,12 +26,12 @@ var parameters = []model.Tensor{
 var mostRecentParams = []model.Tensor{
 	{
 		Name:  "conv2d.0.weights",
-		Shape: model.Shape{1, 1, 2, 2},
+		Shape: shape.New(1, 1, 2, 2),
 		Data:  []float32{2, 2, 2, 2},
 	},
 	{
 		Name:  "conv2d.0.biases",
-		Shape: model.Shape{0, 0, 0, 1},
+		Shape: shape.New(1),
 		Data:  []float32{6},
 	},
 }

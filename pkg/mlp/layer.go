@@ -7,9 +7,10 @@ import (
 
 	"github.com/edatts/ml/pkg/mat"
 	"github.com/edatts/ml/pkg/model"
+	"github.com/edatts/ml/pkg/shape"
 )
 
-type Shape = model.Shape
+type Shape = shape.Shape
 
 type Layer interface {
 	Backward() error
@@ -37,9 +38,6 @@ const (
 var _ Layer = &input{}
 
 type input struct {
-	// TODO: Add shape to all layer types
-	// shape Shape
-
 	acts *mat.Matrix
 
 	size  int
@@ -54,10 +52,6 @@ func (i *input) Forward() error {
 	return nil
 }
 
-func (i *input) width() int {
-	return i.size
-}
-
 func (i *input) activations() *mat.Matrix {
 	return i.acts
 }
@@ -70,7 +64,7 @@ func (i *input) grads() *mat.Matrix {
 func (i *input) update(_, _ float64) {}
 
 func (i *input) init(batchSize int) {
-	i.acts = mat.New(batchSize, i.size)
+	i.acts = mat.New(batchSize, i.Shape().Width())
 }
 
 func (i *input) sumSquaredWeights() float64 {
@@ -89,7 +83,15 @@ func (i *input) Type() LayerType {
 	return Input
 }
 
+func (i *input) width() int {
+	return i.size
+}
+
 var _ Layer = &layer{}
+
+func (l *layer) width() int {
+	return 0
+}
 
 type layer struct {
 	prev  Layer
@@ -122,59 +124,30 @@ type layer struct {
 	shape Shape
 }
 
-// var _ Layer = &output{}
-
-// type output struct {
-// 	*layer
-
-// 	actFn SoftMax
-// }
-
-// // Override the Activations() receiver of the embedded layer so that we can
-// // apply the softmax activation when reading the output activations.
-// func (o *output) activations() *mat.Matrix {
-// 	for i := range o.logits.NumRows() {
-// 		for j, act := range o.actFn.Forward(o.logits.Row(i)) {
-// 			o.acts.Row(i)[j] = act
-// 		}
-// 	}
-
-// 	return o.acts
-// }
-
 func (m *MLP) newLayer(lType LayerType, n int, prev Layer) Layer {
 	if lType == Input {
 		return &input{
 			size:  n,
-			shape: Shape{0, 0, 0, n},
+			shape: shape.New(n),
 		}
 	}
 
 	l := &layer{
 		prev:  prev,
 		actFn: m.getActivationFunc(lType),
-		size:  n,
-		shape: Shape{0, 0, 0, n},
+		shape: shape.New(n),
 	}
 
 	// In case of classification we embed the final layer to overwrite it's
 	// activations() receiver to apply the Softmax activation function.
 	if lType == Output && m.classification {
 		l.isOutput = true
-		// out := &output{
-		// 	layer: l,
-		// }
-		// return out
 	}
 
-	l.weights, l.dCdW = initWeights(l.actFn, l.prev.width(), l.width())
-	l.biases, l.dCdB = initBiases(l.width())
+	l.weights, l.dCdW = initWeights(l.actFn, l.prev.Shape().Width(), l.Shape().Width())
+	l.biases, l.dCdB = initBiases(l.Shape().Width())
 
 	return l
-}
-
-func (l *layer) width() int {
-	return l.size
 }
 
 func (l *layer) grads() *mat.Matrix {
@@ -200,27 +173,13 @@ func (l *layer) init(batchSize int) {
 		return
 	}
 
-	// if !l.initialized {
-	// 	// Init
-	// 	l.weights, l.dCdW = initWeights(l.actFn, l.prev.width(), l.width())
-	// 	l.biases, l.dCdB = initBiases(l.width())
-	// 	l.initialized = true
-	// }
-
 	if batchSize != l.batchSize {
 		// Update batch size
 		l.batchSize = batchSize
 		// Resize logits, and activations for new batch size
-		l.logits, l.acts = initActivations(batchSize, l.width())
-		l.dCdz, l.dCdA = initGradients(batchSize, l.width())
+		l.logits, l.acts = initActivations(batchSize, l.Shape().Width())
+		l.dCdz, l.dCdA = initGradients(batchSize, l.Shape().Width())
 	}
-
-	// // Do we need to zero these every time?
-	// l.logits, l.acts = initActivations(batchSize, l.width())
-	// // Zero grads
-	// l.dCdz, l.dCdA = initGradients(batchSize, l.width())
-	// l.dCdB = make([]float32, l.width())
-	// l.dCdW = mat.New(l.prev.width(), l.width())
 }
 
 func (l *layer) Forward() error {
@@ -296,14 +255,15 @@ func (l *layer) update(lr, lambda float64) {
 }
 
 func (l *layer) data() [2]model.Tensor {
+	// panic(fmt.Sprintf("numRows='%d' numCols='%d'", l.weights.NumRows(), l.weights.NumCols()))
 	return [2]model.Tensor{
 		{
 			Data:  l.weights.Data(),
-			Shape: model.Shape{0, 0, l.weights.NumRows(), l.weights.NumCols()},
+			Shape: shape.New(l.weights.NumRows(), l.weights.NumCols()),
 		},
 		{
 			Data:  l.biases,
-			Shape: model.Shape{0, 0, 0, len(l.biases)},
+			Shape: shape.New(len(l.biases)),
 		},
 	}
 }
