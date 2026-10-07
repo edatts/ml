@@ -1,7 +1,6 @@
 package model
 
 import (
-	"github.com/edatts/ml/pkg/shape"
 	"github.com/edatts/ml/pkg/types"
 )
 
