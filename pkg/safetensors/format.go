@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/edatts/ml/pkg/model"
 	"github.com/edatts/ml/pkg/shape"
+	"github.com/edatts/ml/pkg/types"
+	"github.com/x448/float16"
 )
 
 // File format is SafeTensors:
@@ -44,7 +45,7 @@ type SafeTensorMetadata struct {
 // Format accepts a slice of tensors as input and returns the full
 // SafeTensors encoding of the data or an error. Currently only
 // float32 elements are supported.
-func Format(parameters []model.Tensor) ([]byte, error) {
+func Format(parameters []types.Tensor) ([]byte, error) {
 	var (
 		header = Header{}
 		n      int
@@ -54,16 +55,16 @@ func Format(parameters []model.Tensor) ([]byte, error) {
 	// Create and marshal metadata
 	for _, tensor := range parameters {
 		b, err := json.Marshal(SafeTensorMetadata{
-			DataType: "F32",
+			DataType: string(tensor.DataType),
 			Shape:    tensor.Shape,
-			Offsets:  [2]int{n, n + len(tensor.Data)*4},
+			Offsets:  [2]int{n, n + tensor.Data.ByteLen()},
 		})
 		if err != nil {
 			return nil, fmt.Errorf("failed marshalling metadata for tensor '%s': %w", tensor.Name, err)
 		}
 
 		header[tensor.Name] = b
-		n += len(tensor.Data) * 4
+		n += tensor.Data.ByteLen() * 4
 	}
 
 	headerBytes, err := json.Marshal(header)
@@ -74,9 +75,7 @@ func Format(parameters []model.Tensor) ([]byte, error) {
 	data = binary.LittleEndian.AppendUint64(data, uint64(len(headerBytes)))
 	data = append(data, headerBytes...)
 	for _, tensor := range parameters {
-		for _, elem := range tensor.Data {
-			data = binary.LittleEndian.AppendUint32(data, math.Float32bits(elem))
-		}
+		data = append(data, tensor.Data.Bytes()...)
 	}
 
 	return data, nil
@@ -85,7 +84,7 @@ func Format(parameters []model.Tensor) ([]byte, error) {
 // Parse accepts a slice of bytes in SafeTensors format and decodes the
 // data, returning a slice of tensors or an error. Currently the only
 // supported data type is float32.
-func Parse(b []byte) ([]model.Tensor, error) {
+func Parse(b []byte) ([]types.Tensor, error) {
 	// Read header len
 	metadataLen := binary.LittleEndian.Uint64(b)
 
@@ -97,7 +96,7 @@ func Parse(b []byte) ([]model.Tensor, error) {
 
 	var (
 		allData = b[8+metadataLen:]
-		out     = []model.Tensor{}
+		out     = []types.Tensor{}
 	)
 
 	// For each tensor, read raw data
@@ -107,26 +106,51 @@ func Parse(b []byte) ([]model.Tensor, error) {
 			return nil, fmt.Errorf("failed unmarshalling metadata for layer '%s': %w", name, err)
 		}
 
-		if m.DataType != "F32" {
-			return nil, fmt.Errorf("unsupported data type '%s', only F32 currently supported", m.DataType)
+		if m.DataType != "F32" && m.DataType != "F16" {
+			return nil, fmt.Errorf("unsupported data type '%s', only F32 and F16 currently supported", m.DataType)
 		}
 
 		var (
 			startOffset = m.Offsets[0]
 			endOffset   = m.Offsets[1]
-			data        = make([]float32, (endOffset-startOffset)/4)
+			numBytes    = byteLength(m.DataType)
+			data        types.Data
 		)
 
-		for i := startOffset; i < endOffset; i += 4 {
-			data[(i-startOffset)/4] = math.Float32frombits(binary.LittleEndian.Uint32(allData[i : i+4]))
+		switch m.DataType {
+		case "F32":
+			var bytes = make([]float32, (endOffset-startOffset)/4)
+			for i := startOffset; i < endOffset; i += numBytes {
+				bytes[(i-startOffset)/4] = math.Float32frombits(binary.LittleEndian.Uint32(allData[i : i+4]))
+			}
+			data = &types.F32Data{Data: bytes}
+		case "F16":
+			var bytes = make([]types.Float16, (endOffset-startOffset)/2)
+			for i := startOffset; i < endOffset; i += numBytes {
+				bytes[(i-startOffset)/2] = float16.Frombits(binary.LittleEndian.Uint16(allData[i : i+2]))
+			}
+			data = &types.F16Data{Data: bytes}
+		default:
+			return nil, fmt.Errorf("unsupported data type '%s'", m.DataType)
 		}
 
-		out = append(out, model.Tensor{
-			Name:  name,
-			Shape: m.Shape,
-			Data:  data,
+		out = append(out, types.Tensor{
+			Name:     name,
+			DataType: m.DataType,
+			Shape:    m.Shape,
+			Data:     data,
 		})
 	}
 
 	return out, nil
+}
+
+func byteLength(dType string) int {
+	switch dType {
+	case "F32":
+		return 4
+	case "F16":
+		return 2
+	}
+	panic(fmt.Sprintf("unsupported data type '%s'", dType))
 }

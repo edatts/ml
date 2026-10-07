@@ -4,40 +4,48 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/edatts/ml/pkg/model"
 	"github.com/edatts/ml/pkg/safetensors"
 	"github.com/edatts/ml/pkg/shape"
+	"github.com/edatts/ml/pkg/types"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
 
 var (
-	parameters = []model.Tensor{
+	parameters = []types.Tensor{
 		{
 			Name:  "layers.conv2d_1.weights",
 			Shape: shape.New(2, 1, 3, 3),
-			Data: []float32{
-				0, 1, 2, 3, 4, 5, 6, 7, 8,
-				8, 7, 6, 5, 4, 3, 2, 1, 0,
+			Data: &types.F32Data{
+				Data: []float32{
+					0, 1, 2, 3, 4, 5, 6, 7, 8,
+					8, 7, 6, 5, 4, 3, 2, 1, 0,
+				},
 			},
 		},
 		{
 			Name:  "layers.conv2d_1.biases",
 			Shape: shape.New(2),
-			Data:  []float32{3, 5},
+			Data: &types.F32Data{
+				Data: []float32{3, 5},
+			},
 		},
 		{
 			Name:  "layers.full_1.weights",
 			Shape: shape.New(4, 4),
-			Data: []float32{
-				1, 1, 1, 1, 1, 1, 1, 1,
-				2, 2, 2, 2, 2, 2, 2, 2,
+			Data: &types.F32Data{
+				Data: []float32{
+					1, 1, 1, 1, 1, 1, 1, 1,
+					2, 2, 2, 2, 2, 2, 2, 2,
+				},
 			},
 		},
 		{
 			Name:  "layers.full_1.biases",
 			Shape: shape.New(4),
-			Data:  []float32{3, 3, 3, 3},
+			Data: &types.F32Data{
+				Data: []float32{3, 3, 3, 3},
+			},
 		},
 	}
 
