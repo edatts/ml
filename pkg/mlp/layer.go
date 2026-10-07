@@ -6,8 +6,8 @@ import (
 	"math/rand/v2"
 
 	"github.com/edatts/ml/pkg/mat"
-	"github.com/edatts/ml/pkg/model"
 	"github.com/edatts/ml/pkg/shape"
+	"github.com/edatts/ml/pkg/types"
 )
 
 type Shape = shape.Shape
@@ -19,12 +19,12 @@ type Layer interface {
 	Type() LayerType
 
 	width() int
-	activations() *mat.Matrix
-	grads() *mat.Matrix
+	activations() *mat.F32Matrix
+	grads() *mat.F32Matrix
 	update(lr, lambda float64)
 	init(batchSize int)
 	sumSquaredWeights() float64
-	data() [2]model.Tensor
+	data() [2]types.Tensor
 }
 
 type LayerType string
@@ -38,7 +38,7 @@ const (
 var _ Layer = &input{}
 
 type input struct {
-	acts *mat.Matrix
+	acts *mat.F32Matrix
 
 	size  int
 	shape Shape
@@ -52,13 +52,13 @@ func (i *input) Forward() error {
 	return nil
 }
 
-func (i *input) activations() *mat.Matrix {
+func (i *input) activations() *mat.F32Matrix {
 	return i.acts
 }
 
-func (i *input) grads() *mat.Matrix {
+func (i *input) grads() *mat.F32Matrix {
 	// No grads for this layer
-	return &mat.Matrix{}
+	return &mat.F32Matrix{}
 }
 
 func (i *input) update(_, _ float64) {}
@@ -71,8 +71,8 @@ func (i *input) sumSquaredWeights() float64 {
 	return 0
 }
 
-func (i *input) data() [2]model.Tensor {
-	return [2]model.Tensor{}
+func (i *input) data() [2]types.Tensor {
+	return [2]types.Tensor{}
 }
 
 func (i *input) Shape() Shape {
@@ -103,8 +103,8 @@ type layer struct {
 
 	// weights [][]float64
 	// dCdW    [][]float64
-	weights *mat.Matrix
-	dCdW    *mat.Matrix
+	weights *mat.F32Matrix
+	dCdW    *mat.F32Matrix
 
 	// biases []float64
 	// dCdB   []float64
@@ -113,13 +113,13 @@ type layer struct {
 
 	// logits [][]float64
 	// dCdz   [][]float64
-	logits *mat.Matrix
-	dCdz   *mat.Matrix
+	logits *mat.F32Matrix
+	dCdz   *mat.F32Matrix
 
 	// activations [][]float64
 	// dCdA        [][]float64
-	acts *mat.Matrix
-	dCdA *mat.Matrix
+	acts *mat.F32Matrix
+	dCdA *mat.F32Matrix
 
 	shape Shape
 }
@@ -150,11 +150,11 @@ func (m *MLP) newLayer(lType LayerType, n int, prev Layer) Layer {
 	return l
 }
 
-func (l *layer) grads() *mat.Matrix {
+func (l *layer) grads() *mat.F32Matrix {
 	return l.dCdA
 }
 
-func (l *layer) activations() *mat.Matrix {
+func (l *layer) activations() *mat.F32Matrix {
 	if l.isOutput {
 		// Override the Activations() receiver of the embedded layer so that we can
 		// apply the softmax activation when reading the output activations.
@@ -254,32 +254,34 @@ func (l *layer) update(lr, lambda float64) {
 	}
 }
 
-func (l *layer) data() [2]model.Tensor {
+func (l *layer) data() [2]types.Tensor {
 	// panic(fmt.Sprintf("numRows='%d' numCols='%d'", l.weights.NumRows(), l.weights.NumCols()))
-	return [2]model.Tensor{
+	return [2]types.Tensor{
 		{
-			Data:  l.weights.Data(),
-			Shape: shape.New(l.weights.NumRows(), l.weights.NumCols()),
+			Data:     &types.F32Data{Data: l.weights.Data()},
+			DataType: types.F32,
+			Shape:    shape.New(l.weights.NumRows(), l.weights.NumCols()),
 		},
 		{
-			Data:  l.biases,
-			Shape: shape.New(len(l.biases)),
+			Data:     &types.F32Data{Data: l.biases},
+			DataType: types.F32,
+			Shape:    shape.New(len(l.biases)),
 		},
 	}
 }
 
-func (i *layer) Shape() Shape {
-	return i.shape
+func (l *layer) Shape() Shape {
+	return l.shape
 }
 
-func (i *layer) Type() LayerType {
-	if i.isOutput {
+func (l *layer) Type() LayerType {
+	if l.isOutput {
 		return Output
 	}
 	return Hidden
 }
 
-func initWeights(act ActivationFunc, prevWidth, width int) (*mat.Matrix, *mat.Matrix) {
+func initWeights(act ActivationFunc, prevWidth, width int) (*mat.F32Matrix, *mat.F32Matrix) {
 	var (
 		weights = mat.New(prevWidth, width)
 		dCdW    = mat.New(prevWidth, width)
@@ -321,11 +323,11 @@ func initBiases(width int) ([]float32, []float32) {
 	return biases, dCdB
 }
 
-func initGradients(batchSize int, width int) (*mat.Matrix, *mat.Matrix) {
+func initGradients(batchSize int, width int) (*mat.F32Matrix, *mat.F32Matrix) {
 	return mat.New(batchSize, width), mat.New(batchSize, width)
 }
 
-func initActivations(batchSize int, width int) (*mat.Matrix, *mat.Matrix) {
+func initActivations(batchSize int, width int) (*mat.F32Matrix, *mat.F32Matrix) {
 	return mat.New(batchSize, width), mat.New(batchSize, width)
 }
 

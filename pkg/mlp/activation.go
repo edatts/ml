@@ -2,7 +2,6 @@ package mlp
 
 import (
 	"math"
-
 	"slices"
 )
 

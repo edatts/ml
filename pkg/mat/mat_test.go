@@ -285,20 +285,6 @@ func BenchmarkMultiply(b *testing.B) {
 		}
 	})
 
-	// b.Run("sequentialSIMD", func(b *testing.B) {
-	// 	for b.Loop() {
-	// 		_, err := mat.MulSIMD(A, B)
-	// 		require.NoError(b, err)
-	// 	}
-	// })
-
-	// b.Run("concurrentSIMD", func(b *testing.B) {
-	// 	for b.Loop() {
-	// 		_, err := mat.MulConcurrentSIMD(A, B)
-	// 		require.NoError(b, err)
-	// 	}
-	// })
-
 	b.Run("concurrentSIMD", func(b *testing.B) {
 		for b.Loop() {
 			require.NoError(b, outMatrix.Mul(matrixA, matrixB))

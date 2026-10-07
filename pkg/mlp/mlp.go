@@ -7,6 +7,7 @@ import (
 
 	"github.com/edatts/ml/pkg/mat"
 	"github.com/edatts/ml/pkg/model"
+	"github.com/edatts/ml/pkg/types"
 )
 
 var _ model.Model = &MLP{}
@@ -17,42 +18,48 @@ type MLP struct {
 	identity       string
 }
 
-type Option func(*MLP)
+type opts struct {
+	classification bool
+	layerWidths    []int
+}
+
+type Option func(*opts)
 
 func WithClassifcation() Option {
-	return func(o *MLP) {
+	return func(o *opts) {
 		o.classification = true
 	}
 }
 
 func WithHiddenLayer(width int) Option {
-	return func(m *MLP) {
-		m.Layers = append(m.Layers, m.newLayer(Hidden, width, m.Layers[len(m.Layers)-1]))
+	return func(o *opts) {
+		o.layerWidths = append(o.layerWidths, width)
 	}
 }
 
 func WithHiddenLayers(widths ...int) Option {
-	return func(m *MLP) {
-		for _, width := range widths {
-			m.Layers = append(m.Layers, m.newLayer(Hidden, width, m.Layers[len(m.Layers)-1]))
-		}
+	return func(o *opts) {
+		o.layerWidths = widths
 	}
 }
 
 // Assume the layers are sequential and densely connected.
-func New(inputSize, outputSize int, opts ...Option) (*MLP, error) {
-	m := &MLP{Layers: make([]Layer, 1)}
-	m.Layers[0] = m.newLayer(Input, inputSize, nil)
-	for _, optFn := range opts {
-		optFn(m)
+func New(inputSize, outputSize int, optFns ...Option) (*MLP, error) {
+	o := &opts{}
+	for _, fn := range optFns {
+		fn(o)
 	}
 
-	if len(m.Layers) == 1 {
+	if len(o.layerWidths) == 0 {
 		return nil, fmt.Errorf("no hidden layers specified, hidden layers are required")
 	}
 
-	m.Layers = append(m.Layers, m.newLayer(Output, outputSize, m.Layers[len(m.Layers)-1]))
-
+	m := &MLP{Layers: make([]Layer, len(o.layerWidths)+2), classification: o.classification}
+	m.Layers[0] = m.newLayer(Input, inputSize, nil)
+	for i, width := range o.layerWidths {
+		m.Layers[i+1] = m.newLayer(Hidden, width, m.Layers[i])
+	}
+	m.Layers[len(m.Layers)-1] = m.newLayer(Output, outputSize, m.Layers[len(m.Layers)-2])
 	return m, nil
 }
 
@@ -110,7 +117,7 @@ func (m *MLP) Forward(batch [][]float32, _ bool) ([][]float32, error) {
 	}
 
 	// Collect outputs
-	return m.outputLayer().activations().AsSlices(), nil
+	return m.outputLayer().activations().Rows(), nil
 
 }
 
@@ -146,8 +153,8 @@ func (m *MLP) learnableLayers() []*layer {
 	return out
 }
 
-func (m *MLP) Weights() []model.Tensor {
-	var out []model.Tensor
+func (m *MLP) Weights() []types.Tensor {
+	var out []types.Tensor
 	for i, l := range m.learnableLayers() {
 		d := l.data()
 
@@ -161,7 +168,7 @@ func (m *MLP) Weights() []model.Tensor {
 	return out
 }
 
-func (m *MLP) LoadWeights(parameters []model.Tensor) error {
+func (m *MLP) LoadWeights(parameters []types.Tensor) error {
 	var numLearnable = len(m.learnableLayers())
 	if len(parameters) != numLearnable*2 {
 		return fmt.Errorf("unexpected number of weight tensors, expected %d, got %d", numLearnable*2, len(parameters))
@@ -184,12 +191,21 @@ func (m *MLP) LoadWeights(parameters []model.Tensor) error {
 			return fmt.Errorf("invalid width for biases in learnable layer %d, expected %d, got %d", i, len(l.biases), biases.Shape.Width())
 		}
 
+		var ok bool
+		weightData, ok := weights.FP32Data()
+		if !ok {
+			return fmt.Errorf("unexpected data type, expected 'FP32Data', got '%T'", biases.Data)
+		}
+
 		var err error
-		if l.weights, err = mat.NewFromData(l.prev.Shape().Width(), l.Shape().Width(), weights.Data); err != nil {
+		if l.weights, err = mat.NewFromData(l.prev.Shape().Width(), l.Shape().Width(), weightData); err != nil {
 			return fmt.Errorf("failed loading weights: %w", err)
 		}
 
-		l.biases = biases.Data
+		l.biases, ok = biases.FP32Data()
+		if !ok {
+			return fmt.Errorf("unexpected data type, expected 'FP32Data', got '%T'", biases.Data)
+		}
 	}
 
 	return nil

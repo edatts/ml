@@ -4,11 +4,20 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/edatts/ml/pkg/types"
 	"github.com/x448/float16"
 )
 
-type Float16 = float16.Float16
+type Float16 = types.Float16
 
+// F16Matrix supports Matrix operations on an FP16 data type.
+// Currently the matrix multiplications are not high enough
+// precision for use in NN training. This is due to the fact
+// that in each chunk/tile we cast the accumulated FP32 value
+// down to FP16 before saving it to main memory. We need to
+// cast the accumulated values down to FP16 only once we have
+// accumulated all results for that particular element in the
+// output matrix...
 type F16Matrix struct {
 	data []Float16
 	shape
@@ -54,14 +63,6 @@ func NewF16FromData(numRows, numCols int, data []Float16) (*F16Matrix, error) {
 		data:  data,
 		shape: [2]int{numRows, numCols},
 	}, nil
-}
-
-func (m *F16Matrix) AsSlices() [][]Float16 {
-	var out = make([][]Float16, m.NumRows())
-	for i := range m.NumRows() {
-		out[i] = m.Row(i)
-	}
-	return out
 }
 
 func (m *F16Matrix) Data() []Float16 {
@@ -205,7 +206,7 @@ func (m *F16Matrix) Mul(A, B *F16Matrix) error {
 					// This is our GoASM func that handles the muliplications and
 					// additions for each chunk, the results are accumulated in the
 					// output slice in an additive fashion.
-					DotF16MatChunk16(A1, B1, B2, B3, B4, B5, B6, B7, B8, outRow[kIdx:kIdx+16])
+					DotF16MatChunk8x16(A1, B1, B2, B3, B4, B5, B6, B7, B8, outRow[kIdx:kIdx+16])
 				}
 
 				// If remainder is >= 8 then process an 8 x 8 chunk here then add
@@ -223,7 +224,7 @@ func (m *F16Matrix) Mul(A, B *F16Matrix) error {
 					B7 := B.data[chunkIdx+(6*BN) : chunkIdx+(6*BN)+8]
 					B8 := B.data[chunkIdx+(7*BN) : chunkIdx+(7*BN)+8]
 
-					DotF16MatChunk8(A1, B1, B2, B3, B4, B5, B6, B7, B8, outRow[k:k+8])
+					DotF16MatChunk8x8(A1, B1, B2, B3, B4, B5, B6, B7, B8, outRow[k:k+8])
 					extraBIndex += 8
 					BRem -= 8
 				}
@@ -242,7 +243,7 @@ func (m *F16Matrix) Mul(A, B *F16Matrix) error {
 					B7 := B.data[chunkIdx+(6*BN) : chunkIdx+(6*BN)+4]
 					B8 := B.data[chunkIdx+(7*BN) : chunkIdx+(7*BN)+4]
 
-					DotF16MatChunk4(A1, B1, B2, B3, B4, B5, B6, B7, B8, outRow[k:k+4])
+					DotF16MatChunk8x4(A1, B1, B2, B3, B4, B5, B6, B7, B8, outRow[k:k+4])
 					extraBIndex += 4
 					BRem -= 4
 				}
@@ -257,7 +258,7 @@ func (m *F16Matrix) Mul(A, B *F16Matrix) error {
 				// the vector.
 				for k := BQuotient*16 + extraBIndex; k < BN; k++ {
 					chunkIdx := k + ((j * 8) * BN)
-					DotF16RowCol(A1, B.data, outRow, chunkIdx, BN, k)
+					DotF16RowCol8(A1, B.data, outRow, chunkIdx, BN, k)
 				}
 			}
 
@@ -265,6 +266,7 @@ func (m *F16Matrix) Mul(A, B *F16Matrix) error {
 			//
 			// Here we try to process a 4x8 chunk since there are not enough
 			// columns left in A to do a 4xN chunk.
+			//
 			var extraAIndex int
 			if ARem >= 4 {
 				var A1 = row[(AQuotient * 8) : (AQuotient*8)+4]
@@ -276,6 +278,22 @@ func (m *F16Matrix) Mul(A, B *F16Matrix) error {
 					B3 := B.data[chunkIdx+(2*BN) : chunkIdx+(2*BN)+8]
 					B4 := B.data[chunkIdx+(3*BN) : chunkIdx+(3*BN)+8]
 					DotF16Chunk4x8(A1, B1, B2, B3, B4, outRow[kIdx:kIdx+8])
+				}
+
+				b2Rem := BN % 8
+				if b2Rem >= 4 {
+					k := ((BN / 8) * 8)
+					chunkIdx := k + ((AQuotient * 8) * BN)
+					B1 := B.data[chunkIdx+(0*BN) : chunkIdx+(0*BN)+4]
+					B2 := B.data[chunkIdx+(1*BN) : chunkIdx+(1*BN)+4]
+					B3 := B.data[chunkIdx+(2*BN) : chunkIdx+(2*BN)+4]
+					B4 := B.data[chunkIdx+(3*BN) : chunkIdx+(3*BN)+4]
+					DotF16Chunk4x4(A1, B1, B2, B3, B4, outRow[k:k+4])
+				}
+
+				for k := ((BN / 8) * 8) + 4; k < BN; k++ {
+					chunkIdx := k + ((AQuotient * 8) * BN)
+					DotF16RowCol4(A1, B.data, outRow, chunkIdx, BN, k)
 				}
 
 				extraAIndex += 4
@@ -299,6 +317,9 @@ func (m *F16Matrix) Mul(A, B *F16Matrix) error {
 	}
 
 	wg.Wait()
+	// for _, row := range m.Rows() {
+	// 	slog.Info("actual", "row", row)
+	// }
 	return nil
 }
 
@@ -322,15 +343,27 @@ func (m *F16Matrix) mulValidate(A, B *F16Matrix) error {
 	return nil
 }
 
-func DotF16MatChunk16(A1, B1, B2, B3, B4, B5, B6, B7, B8, out []Float16)
+func (m *F16Matrix) Height() int {
+	return m.NumRows()
+}
 
-func DotF16MatChunk8(A1, B1, B2, B3, B4, B5, B6, B7, B8, out []Float16)
+func (m *F16Matrix) Width() int {
+	return m.NumCols()
+}
 
-func DotF16MatChunk4(A1, B1, B2, B3, B4, B5, B6, B7, B8, out []Float16)
+func DotF16MatChunk8x16(A1, B1, B2, B3, B4, B5, B6, B7, B8, out []Float16)
 
-func DotF16RowCol(A, B, out []Float16, idx, stride, outIdx int)
+func DotF16MatChunk8x8(A1, B1, B2, B3, B4, B5, B6, B7, B8, out []Float16)
+
+func DotF16MatChunk8x4(A1, B1, B2, B3, B4, B5, B6, B7, B8, out []Float16)
+
+func DotF16RowCol8(A, B, out []Float16, idx, stride, outIdx int)
 
 func DotF16Chunk4x8(A1, B1, B2, B3, B4, out []Float16)
+
+func DotF16Chunk4x4(A1, B1, B2, B3, B4, out []Float16)
+
+func DotF16RowCol4(A, B, out []Float16, idx, stride, outIdx int)
 
 func addF16s(A, B, out []Float16) {
 	if haveArchF16 {

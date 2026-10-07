@@ -15,19 +15,27 @@ func (s shape) NumCols() int {
 	return s[1]
 }
 
-type Matrix struct {
+func (m F32Matrix) Height() int {
+	return m.NumRows()
+}
+
+func (m F32Matrix) Width() int {
+	return m.NumCols()
+}
+
+type F32Matrix struct {
 	data []float32
 	shape
 }
 
-func New(numRows, numCols int) *Matrix {
-	return &Matrix{
+func New(numRows, numCols int) *F32Matrix {
+	return &F32Matrix{
 		data:  make([]float32, numRows*numCols),
 		shape: [2]int{numRows, numCols},
 	}
 }
 
-func NewFromSlices(orig [][]float32) (*Matrix, error) {
+func NewFromSlices(orig [][]float32) (*F32Matrix, error) {
 	if len(orig) == 0 {
 		return nil, fmt.Errorf("zero length slice provided")
 	}
@@ -45,24 +53,24 @@ func NewFromSlices(orig [][]float32) (*Matrix, error) {
 		}
 	}
 
-	return &Matrix{
+	return &F32Matrix{
 		data:  data,
 		shape: [2]int{len(orig), len(orig[0])},
 	}, nil
 }
 
-func NewFromData(numRows, numCols int, data []float32) (*Matrix, error) {
+func NewFromData(numRows, numCols int, data []float32) (*F32Matrix, error) {
 	if len(data) != numRows*numCols {
 		return nil, fmt.Errorf("length of data is incompatible with specified dimensions")
 	}
 
-	return &Matrix{
+	return &F32Matrix{
 		data:  data,
 		shape: [2]int{numRows, numCols},
 	}, nil
 }
 
-func (m *Matrix) AsSlices() [][]float32 {
+func (m *F32Matrix) Rows() [][]float32 {
 	var out = make([][]float32, m.NumRows())
 	for i := range m.NumRows() {
 		out[i] = m.Row(i)
@@ -70,16 +78,16 @@ func (m *Matrix) AsSlices() [][]float32 {
 	return out
 }
 
-func (m *Matrix) Data() []float32 {
+func (m *F32Matrix) Data() []float32 {
 	return m.data
 }
 
-func (m *Matrix) Row(i int) []float32 {
+func (m *F32Matrix) Row(i int) []float32 {
 	start := i * m.NumCols()
 	return m.data[start : start+m.NumCols()]
 }
 
-func (m *Matrix) Transpose() *Matrix {
+func (m *F32Matrix) Transpose() *F32Matrix {
 	if len(m.data) == 0 {
 		return m
 	}
@@ -92,13 +100,13 @@ func (m *Matrix) Transpose() *Matrix {
 		}
 	}
 
-	return &Matrix{
+	return &F32Matrix{
 		data:  outData,
 		shape: [2]int{m.NumCols(), m.NumRows()},
 	}
 }
 
-func (m *Matrix) AddToRows(vec []float32) error {
+func (m *F32Matrix) AddToRows(vec []float32) error {
 	if len(vec) != m.NumCols() {
 		return fmt.Errorf("vector and matrix are incompatible shapes")
 	}
@@ -112,7 +120,7 @@ func (m *Matrix) AddToRows(vec []float32) error {
 	return nil
 }
 
-func (m *Matrix) ApplyActivation(fn func(float32) float32) *Matrix {
+func (m *F32Matrix) ApplyActivation(fn func(float32) float32) *F32Matrix {
 	var out = New(m.NumRows(), m.NumCols())
 	for i, datum := range m.data {
 		out.data[i] = fn(datum)
@@ -120,7 +128,7 @@ func (m *Matrix) ApplyActivation(fn func(float32) float32) *Matrix {
 	return out
 }
 
-func (m *Matrix) Hadamard(A, B *Matrix) error {
+func (m *F32Matrix) Hadamard(A, B *F32Matrix) error {
 	if A.shape != B.shape || m.shape != A.shape {
 		return fmt.Errorf("input matrices are incompatible shapes")
 	}
@@ -132,7 +140,7 @@ func (m *Matrix) Hadamard(A, B *Matrix) error {
 	return nil
 }
 
-func (m *Matrix) AvgCols() []float32 {
+func (m *F32Matrix) AvgCols() []float32 {
 	var out = make([]float32, m.NumCols())
 	for i := range m.NumRows() {
 		for j, elem := range m.Row(i) {
@@ -150,7 +158,7 @@ func (m *Matrix) AvgCols() []float32 {
 // Mul calculates the dot product between input matrices A and B and stores
 // the result in the matrix m. It returns an error if any of the matrices
 // are not compatible shapes for the operation.
-func (m *Matrix) Mul(A, B *Matrix) error {
+func (m *F32Matrix) Mul(A, B *F32Matrix) error {
 	if err := m.mulValidate(A, B); err != nil {
 		return err
 	}
@@ -245,7 +253,7 @@ func (m *Matrix) Mul(A, B *Matrix) error {
 	return nil
 }
 
-func (m *Matrix) mulValidate(A, B *Matrix) error {
+func (m *F32Matrix) mulValidate(A, B *F32Matrix) error {
 	if m == nil || A == nil || B == nil {
 		return fmt.Errorf("one or more matrices are nil")
 	}
