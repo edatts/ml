@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 
 	"github.com/edatts/ml/pkg/model"
+	"github.com/edatts/ml/pkg/types"
 )
 
 type option func(*mockModel)
@@ -15,7 +16,7 @@ func WithIdentity(ident string) option {
 	}
 }
 
-func WithWeights(weights []model.Tensor) option {
+func WithWeights(weights []types.Tensor) option {
 	return func(m *mockModel) {
 		m.weights = weights
 	}
@@ -34,7 +35,7 @@ func NewMockModel(optFns ...option) *mockModel {
 // Mock model will multiply all inputs by 2
 type mockModel struct {
 	identity string
-	weights  []model.Tensor
+	weights  []types.Tensor
 }
 
 func (m *mockModel) Forward(inputs [][]float32, _ bool) ([][]float32, error) {
@@ -52,7 +53,7 @@ func (m *mockModel) Backward(_ [][]float32, _, _, _ float64) error {
 	return nil
 }
 
-func (m *mockModel) Weights() []model.Tensor {
+func (m *mockModel) Weights() []types.Tensor {
 	return m.weights
 }
 
@@ -60,7 +61,7 @@ func (m *mockModel) SumSquaredWeights() float64 {
 	return 0
 }
 
-func (m *mockModel) LoadWeights(parameters []model.Tensor) error {
+func (m *mockModel) LoadWeights(parameters []types.Tensor) error {
 	m.weights = parameters
 	return nil
 }
