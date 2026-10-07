@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/edatts/ml/pkg/mat"
-	"github.com/edatts/ml/pkg/model"
 	"github.com/edatts/ml/pkg/shape"
+	"github.com/edatts/ml/pkg/types"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -60,8 +60,8 @@ type Layer interface {
 	batch() []Sample
 	activationDeltas() []Sample
 	sumSquaredWeights() float32
-	parameters() map[string]model.Tensor
-	loadParameters(model.Tensor) error
+	parameters() map[string]types.Tensor
+	loadParameters(types.Tensor) error
 }
 
 // type LayerType int
@@ -149,11 +149,11 @@ func (l *input) Name() string {
 	return l.name
 }
 
-func (l *input) parameters() map[string]model.Tensor {
+func (l *input) parameters() map[string]types.Tensor {
 	return nil
 }
 
-func (l *input) loadParameters(_ model.Tensor) error {
+func (l *input) loadParameters(_ types.Tensor) error {
 	return errors.New("input layers have no parameters to load")
 }
 
@@ -175,7 +175,7 @@ type conv2D struct {
 	// weights [][]float32
 	// dCdW    [][]float32
 	kernels      []*Kernel
-	kernelMatrix *mat.Matrix
+	kernelMatrix *mat.F32Matrix
 
 	shape      shape.Shape
 	kernelSize int // For now just support square kernels
@@ -266,7 +266,7 @@ func (l *conv2D) initGrads(batchSize int) {
 	l.dCdA = NewBatch(batchSize, l.shape)
 }
 
-func (l *conv2D) getKernelMatrix() (*mat.Matrix, error) {
+func (l *conv2D) getKernelMatrix() (*mat.F32Matrix, error) {
 	// We need to remember to set the matrix to nil after every batch for this
 	// to work properly, otherwise the weights will never update...
 	if l.kernelMatrix != nil {
@@ -297,7 +297,7 @@ func (l *conv2D) getKernelMatrix() (*mat.Matrix, error) {
 
 // getdCdZMatrix builds a matrix from the logit deltas to be used in a convolution
 // operation in the backwards pass.
-func (l *conv2D) getdCdZMatrix(dCdZ []float32) (*mat.Matrix, error) {
+func (l *conv2D) getdCdZMatrix(dCdZ []float32) (*mat.F32Matrix, error) {
 	if len(dCdZ) == 0 {
 		return nil, fmt.Errorf("layer is not initialized, no dCdZ found")
 	}
@@ -504,7 +504,7 @@ func (l *conv2D) Backward() error {
 	}
 
 	var eg errgroup.Group
-	var weightMatrices = make([]*mat.Matrix, len(l.kernels))
+	var weightMatrices = make([]*mat.F32Matrix, len(l.kernels))
 	for i, kernel := range l.kernels {
 		eg.Go(func() error {
 			kSample, err := NewSampleFromData(kernel.shape, kernel.weights)
@@ -693,32 +693,39 @@ func (l *conv2D) Name() string {
 	return l.name
 }
 
-func (l *conv2D) parameters() map[string]model.Tensor {
-	return map[string]model.Tensor{
+func (l *conv2D) parameters() map[string]types.Tensor {
+	return map[string]types.Tensor{
 		fmt.Sprintf("%s.weights", l.name): {
-			Name:  fmt.Sprintf("%s.weights", l.name),
-			Shape: shape.New(l.shape.Channels(), l.prev.Shape().Channels(), l.kernelSize, l.kernelSize),
-			Data:  l.kernelMatrix.Data(), // This should only ever be nil briefly during Forward()...
+			Name:     fmt.Sprintf("%s.weights", l.name),
+			Shape:    shape.New(l.shape.Channels(), l.prev.Shape().Channels(), l.kernelSize, l.kernelSize),
+			DataType: types.F32,
+			Data:     &types.F32Data{Data: l.kernelMatrix.Data()}, // This should only ever be nil briefly during Forward()...
 		},
 		fmt.Sprintf("%s.biases", l.name): {
-			Name:  fmt.Sprintf("%s.biases", l.name),
-			Shape: shape.New(l.shape.Channels()),
-			Data:  l.biases(),
+			Name:     fmt.Sprintf("%s.biases", l.name),
+			Shape:    shape.New(l.shape.Channels()),
+			DataType: types.F32,
+			Data:     &types.F32Data{Data: l.biases()},
 		},
 	}
 }
 
-func (l *conv2D) loadParameters(tensor model.Tensor) error {
+func (l *conv2D) loadParameters(tensor types.Tensor) error {
+	tensorData, ok := tensor.FP32Data()
+	if !ok {
+		return fmt.Errorf("data type is not in F32, only F32 currently supported")
+	}
+
 	if strings.HasSuffix(tensor.Name, ".weights") {
 		var kernelVol = l.kernelSize * l.kernelSize * l.prev.Shape().Channels()
 		for i, k := range l.kernels {
-			k.weights = tensor.Data[i*kernelVol : i*kernelVol+kernelVol]
+			k.weights = tensorData[i*kernelVol : i*kernelVol+kernelVol]
 		}
 		return nil
 	}
 
 	if strings.HasSuffix(tensor.Name, ".biases") {
-		for i, bias := range tensor.Data {
+		for i, bias := range tensorData {
 			l.kernels[i].bias = bias
 		}
 		return nil
@@ -918,11 +925,11 @@ func (l *pool2D) Name() string {
 	return l.name
 }
 
-func (l *pool2D) parameters() map[string]model.Tensor {
+func (l *pool2D) parameters() map[string]types.Tensor {
 	return nil
 }
 
-func (l *pool2D) loadParameters(_ model.Tensor) error {
+func (l *pool2D) loadParameters(_ types.Tensor) error {
 	return errors.New("pool2D layers have no parameters to load")
 }
 
@@ -933,18 +940,18 @@ type fullyConnected struct {
 	prev  Layer
 	actFn ActivationFunc
 
-	logits *mat.Matrix
-	dCdZ   *mat.Matrix
+	logits *mat.F32Matrix
+	dCdZ   *mat.F32Matrix
 
-	prevActivations *mat.Matrix
-	// acts            *mat.Matrix
-	// dCdA            *mat.Matrix
+	prevActivations *mat.F32Matrix
+	// acts            *mat.F32Matrix
+	// dCdA            *mat.F32Matrix
 	acts []Sample
 	dCdA []Sample
 
 	// The weights here are connections to the prev layer
-	weights *mat.Matrix
-	dCdW    *mat.Matrix
+	weights *mat.F32Matrix
+	dCdW    *mat.F32Matrix
 
 	biases []float32
 	dCdB   []float32
@@ -1127,33 +1134,40 @@ func (l *fullyConnected) Name() string {
 	return l.name
 }
 
-func (l *fullyConnected) parameters() map[string]model.Tensor {
-	return map[string]model.Tensor{
+func (l *fullyConnected) parameters() map[string]types.Tensor {
+	return map[string]types.Tensor{
 		fmt.Sprintf("%s.weights", l.name): {
-			Name:  fmt.Sprintf("%s.weights", l.name),
-			Shape: shape.New(l.prev.Shape().Width(), l.shape.Width()),
-			Data:  l.weights.Data(),
+			Name:     fmt.Sprintf("%s.weights", l.name),
+			Shape:    shape.New(l.prev.Shape().Width(), l.shape.Width()),
+			DataType: types.F32,
+			Data:     &types.F32Data{Data: l.weights.Data()},
 		},
 		fmt.Sprintf("%s.biases", l.name): {
-			Name:  fmt.Sprintf("%s.biases", l.name),
-			Shape: shape.New(l.shape.Width()),
-			Data:  l.biases,
+			Name:     fmt.Sprintf("%s.biases", l.name),
+			Shape:    shape.New(l.shape.Width()),
+			DataType: types.F32,
+			Data:     &types.F32Data{Data: l.biases},
 		},
 	}
 }
 
 // TODO: Should probably validate the shape...
-func (l *fullyConnected) loadParameters(tensor model.Tensor) error {
+func (l *fullyConnected) loadParameters(tensor types.Tensor) error {
+	tensorData, ok := tensor.FP32Data()
+	if !ok {
+		return fmt.Errorf("data type is not in F32, only F32 currently supported")
+	}
+
 	if strings.HasSuffix(tensor.Name, ".weights") {
 		var err error
-		if l.weights, err = mat.NewFromData(l.weights.NumRows(), l.weights.NumCols(), tensor.Data); err != nil {
+		if l.weights, err = mat.NewFromData(l.weights.NumRows(), l.weights.NumCols(), tensorData); err != nil {
 			return fmt.Errorf("failed re-creating weights matrix: %w", err)
 		}
 		return nil
 	}
 
 	if strings.HasSuffix(tensor.Name, ".biases") {
-		l.biases = tensor.Data
+		l.biases = tensorData
 		return nil
 	}
 
@@ -1257,11 +1271,11 @@ func (l *flatten) Name() string {
 	return l.name
 }
 
-func (l *flatten) parameters() map[string]model.Tensor {
+func (l *flatten) parameters() map[string]types.Tensor {
 	return nil
 }
 
-func (l *flatten) loadParameters(_ model.Tensor) error {
+func (l *flatten) loadParameters(_ types.Tensor) error {
 	return errors.New("flatten layers have no parameters to load")
 }
 
@@ -1373,10 +1387,10 @@ func (l *dropout) Name() string {
 	return l.name
 }
 
-func (l *dropout) parameters() map[string]model.Tensor {
+func (l *dropout) parameters() map[string]types.Tensor {
 	return nil
 }
 
-func (l *dropout) loadParameters(_ model.Tensor) error {
+func (l *dropout) loadParameters(_ types.Tensor) error {
 	return errors.New("dropout layers have no parameters to load")
 }

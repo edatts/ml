@@ -10,6 +10,7 @@ import (
 
 	"github.com/edatts/ml/pkg/model"
 	"github.com/edatts/ml/pkg/shape"
+	"github.com/edatts/ml/pkg/types"
 )
 
 var _ model.Model = &CNN{}
@@ -239,8 +240,8 @@ func (c *CNN) SumSquaredWeights() float64 {
 	return sum
 }
 
-func (c *CNN) Weights() []model.Tensor {
-	var out = []model.Tensor{}
+func (c *CNN) Weights() []types.Tensor {
+	var out = []types.Tensor{}
 
 	for _, l := range c.layers {
 		for _, tensor := range l.parameters() {
@@ -251,7 +252,7 @@ func (c *CNN) Weights() []model.Tensor {
 	return out
 }
 
-func (c *CNN) LoadWeights(parameters []model.Tensor) error {
+func (c *CNN) LoadWeights(parameters []types.Tensor) error {
 	for _, tensor := range parameters {
 		parts := strings.Split(tensor.Name, ".")
 		layerName := strings.Join(parts[:len(parts)-1], ".")

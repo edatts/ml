@@ -39,7 +39,7 @@ func NewBatch(batchSize int, sampleShape shape.Shape) []Sample {
 	return out
 }
 
-// Creates a new batch from a *mat.Matrix where each row of the matrix
+// Creates a new batch from a *mat.F32Matrix where each row of the matrix
 // is converted to a Sample in the batch.
 //
 // Should we copy the data instead of re-slicing it? This way if the
@@ -51,7 +51,7 @@ func NewBatch(batchSize int, sampleShape shape.Shape) []Sample {
 // Note that the provided shape is the shape of the Sample not the
 // shape of the batch. This might change later if we implement a
 // proper batch type.
-func NewBatchFromMatrix(shape shape.Shape, matrix *mat.Matrix) ([]Sample, error) {
+func NewBatchFromMatrix(shape shape.Shape, matrix *mat.F32Matrix) ([]Sample, error) {
 	if matrix == nil {
 		return nil, fmt.Errorf("nil matrix provided")
 	}
@@ -133,7 +133,7 @@ func (s Sample) Hadamard(s2 Sample) (Sample, error) {
 // layers. This can be implemented as a receiver on the Batch type if we
 // implement it later. This operation will also be more efficient if we
 // store all the batch data in a contiguous slice of memory.
-func BatchToMatrix(batch []Sample) (*mat.Matrix, error) {
+func BatchToMatrix(batch []Sample) (*mat.F32Matrix, error) {
 	if len(batch) == 0 {
 		return nil, fmt.Errorf("batch length is zero")
 	}
@@ -150,7 +150,7 @@ func BatchToMatrix(batch []Sample) (*mat.Matrix, error) {
 }
 
 // Im2Col applies the Im2Col operation to the sample, copying the data to
-// a new *mat.Matrix before returning it. This function only works for 2D
+// a new *mat.F32Matrix before returning it. This function only works for 2D
 // convolution since it is assumed that the kernel depth is the same as
 // the number of input channels.
 //
@@ -205,7 +205,7 @@ func BatchToMatrix(batch []Sample) (*mat.Matrix, error) {
 //	[ 111, 121, 131, 211, 221, 231, 311, 321, 331 ]
 //	[ 112, 122, 132, 212, 222, 232, 312, 322, 332 ]
 //	[ 113, 123, 133, 213, 223, 233, 313, 323, 333 ]
-func (s Sample) Im2Col(stride, kernelHeight, kernelWidth int, padding Padding, preserveChannels bool) (*mat.Matrix, error) {
+func (s Sample) Im2Col(stride, kernelHeight, kernelWidth int, padding Padding, preserveChannels bool) (*mat.F32Matrix, error) {
 	if stride != 1 {
 		panic("only stride of 1 currently supported...")
 	}
