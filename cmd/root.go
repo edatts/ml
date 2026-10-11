@@ -5,6 +5,8 @@ import (
 	"os"
 
 	"github.com/edatts/ml/cmd/parse"
+	qlearncmd "github.com/edatts/ml/cmd/qlearn"
+	snakecmd "github.com/edatts/ml/cmd/snake"
 	"github.com/spf13/cobra"
 )
 
@@ -19,6 +21,8 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(parse.ParseIDXCmd)
+	rootCmd.AddCommand(snakecmd.Cmd)
+	rootCmd.AddCommand(qlearncmd.Cmd)
 }
 
 func Execute() {
