@@ -83,6 +83,8 @@ func (c *ClassificationRun) Step() error {
 		return fmt.Errorf("failed backpropagating: %w", err)
 	}
 
+	// Runtimes for CNN training...
+	//
 	// Recent values pre-optimization:
 	//	- Batch Size 64: 0.4304s
 	// 	- Batch Size 128: 0.8735s

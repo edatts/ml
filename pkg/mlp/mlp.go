@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"slices"
 
 	"github.com/edatts/ml/pkg/mat"
 	"github.com/edatts/ml/pkg/model"
@@ -63,6 +64,12 @@ func New(inputSize, outputSize int, optFns ...Option) (*MLP, error) {
 	return m, nil
 }
 
+func NewFromTensors(tensors []types.Tensor) (*MLP, error) {
+	panic("mlp.NewFromTensors is unimplemented")
+	var m = &MLP{}
+	return m, nil
+}
+
 func (m *MLP) inputLayer() Layer {
 	return m.Layers[0]
 }
@@ -114,6 +121,11 @@ func (m *MLP) Forward(batch [][]float32, _ bool) ([][]float32, error) {
 		if err := l.Forward(); err != nil {
 			return nil, fmt.Errorf("layer %d failed forward pass: %w", i, err)
 		}
+		// if l.Type() == Output {
+		// 	fmt.Printf("%v\n", l.activations().Data())
+		// } else {
+		// 	fmt.Printf("%v\n", l.activations().Data()[:10])
+		// }
 	}
 
 	// Collect outputs
@@ -121,7 +133,7 @@ func (m *MLP) Forward(batch [][]float32, _ bool) ([][]float32, error) {
 
 }
 
-func (m *MLP) Backward(dCdA [][]float32, lr, lambda, _ float64) error {
+func (m *MLP) Backward(dCdA [][]float32, lr, lambda, beta float64) error {
 	// Set gradients of output layer
 	for i := range len(dCdA) {
 		for j := range len(dCdA[0]) {
@@ -137,7 +149,7 @@ func (m *MLP) Backward(dCdA [][]float32, lr, lambda, _ float64) error {
 	}
 
 	for i := len(m.Layers) - 1; i >= 1; i-- {
-		m.Layers[i].update(lr, lambda)
+		m.Layers[i].update(lr, lambda, beta)
 	}
 
 	return nil
@@ -175,9 +187,17 @@ func (m *MLP) LoadWeights(parameters []types.Tensor) error {
 	}
 
 	for i, l := range m.learnableLayers() {
-		l.init(0) // To ensure we don't overwrite loaded weights later.
-		weights := parameters[i*2]
-		biases := parameters[i*2+1]
+		weightsIdx := slices.IndexFunc(parameters, func(t types.Tensor) bool {
+			return t.Name == fmt.Sprintf("hidden.%d.weights", i)
+		})
+
+		biasesIdx := slices.IndexFunc(parameters, func(t types.Tensor) bool {
+			return t.Name == fmt.Sprintf("hidden.%d.biases", i)
+		})
+
+		// l.init(0) // To ensure we don't overwrite loaded weights later.
+		weights := parameters[weightsIdx]
+		biases := parameters[biasesIdx]
 
 		if l.prev.Shape().Width() != weights.Shape.Height() {
 			return fmt.Errorf("invalid height for weights in learnable layer %d, expected %d, got %d", i, l.prev.Shape().Width(), weights.Shape.Height())

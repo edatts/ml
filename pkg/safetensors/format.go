@@ -64,7 +64,7 @@ func Format(parameters []types.Tensor) ([]byte, error) {
 		}
 
 		header[tensor.Name] = b
-		n += tensor.Data.ByteLen() * 4
+		n += tensor.Data.ByteLen()
 	}
 
 	headerBytes, err := json.Marshal(header)
@@ -119,17 +119,17 @@ func Parse(b []byte) ([]types.Tensor, error) {
 
 		switch m.DataType {
 		case "F32":
-			var bytes = make([]float32, (endOffset-startOffset)/4)
+			var nums = make([]float32, (endOffset-startOffset)/4)
 			for i := startOffset; i < endOffset; i += numBytes {
-				bytes[(i-startOffset)/4] = math.Float32frombits(binary.LittleEndian.Uint32(allData[i : i+4]))
+				nums[(i-startOffset)/4] = math.Float32frombits(binary.LittleEndian.Uint32(allData[i : i+4]))
 			}
-			data = &types.F32Data{Data: bytes}
+			data = &types.F32Data{Data: nums}
 		case "F16":
-			var bytes = make([]types.Float16, (endOffset-startOffset)/2)
+			var nums = make([]types.Float16, (endOffset-startOffset)/2)
 			for i := startOffset; i < endOffset; i += numBytes {
-				bytes[(i-startOffset)/2] = float16.Frombits(binary.LittleEndian.Uint16(allData[i : i+2]))
+				nums[(i-startOffset)/2] = float16.Frombits(binary.LittleEndian.Uint16(allData[i : i+2]))
 			}
-			data = &types.F16Data{Data: bytes}
+			data = &types.F16Data{Data: nums}
 		default:
 			return nil, fmt.Errorf("unsupported data type '%s'", m.DataType)
 		}

@@ -47,12 +47,28 @@ func (r ReLU) Backward(in float32) float32 {
 	return 0
 }
 
-func LeakyReLU(in float32) float32 {
+type LeakyReLU struct{}
+
+func (r LeakyReLU) Forward(in float32) float32 {
 	if in > 0 {
 		return in
 	}
-	return in * 0.01
+	return 0.01 * in
 }
+
+func (r LeakyReLU) Backward(in float32) float32 {
+	if in > 0 {
+		return 1
+	}
+	return 0.01
+}
+
+// func LeakyReLU(in float32) float32 {
+// 	if in > 0 {
+// 		return in
+// 	}
+// 	return in * 0.01
+// }
 
 type SoftMax struct{}
 

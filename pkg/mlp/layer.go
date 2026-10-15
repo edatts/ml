@@ -21,7 +21,7 @@ type Layer interface {
 	width() int
 	activations() *mat.F32Matrix
 	grads() *mat.F32Matrix
-	update(lr, lambda float64)
+	update(lr, lambda, beta float64)
 	init(batchSize int)
 	sumSquaredWeights() float64
 	data() [2]types.Tensor
@@ -61,7 +61,7 @@ func (i *input) grads() *mat.F32Matrix {
 	return &mat.F32Matrix{}
 }
 
-func (i *input) update(_, _ float64) {}
+func (i *input) update(_, _, _ float64) {}
 
 func (i *input) init(batchSize int) {
 	i.acts = mat.New(batchSize, i.Shape().Width())
@@ -97,14 +97,16 @@ type layer struct {
 	prev  Layer
 	actFn ActivationFunc
 	// initialized bool
-	batchSize int
-	size      int
-	isOutput  bool
+	batchSize      int
+	size           int
+	isOutput       bool
+	classification bool
 
 	// weights [][]float64
 	// dCdW    [][]float64
-	weights *mat.F32Matrix
-	dCdW    *mat.F32Matrix
+	weights    *mat.F32Matrix
+	dCdW       *mat.F32Matrix
+	velocities [][]float32
 
 	// biases []float64
 	// dCdB   []float64
@@ -140,22 +142,29 @@ func (m *MLP) newLayer(lType LayerType, n int, prev Layer) Layer {
 
 	// In case of classification we embed the final layer to overwrite it's
 	// activations() receiver to apply the Softmax activation function.
-	if lType == Output && m.classification {
+	if lType == Output {
 		l.isOutput = true
 	}
 
-	l.weights, l.dCdW = initWeights(l.actFn, l.prev.Shape().Width(), l.Shape().Width())
+	if m.classification {
+		l.classification = true
+	}
+
+	l.weights, l.dCdW, l.velocities = initWeights(l.actFn, l.prev.Shape().Width(), l.Shape().Width())
 	l.biases, l.dCdB = initBiases(l.Shape().Width())
 
 	return l
 }
 
 func (l *layer) grads() *mat.F32Matrix {
+	// if l.Type() == Output {
+	// 	slog.Info("grads", "grads", l.dCdA.Data()[:4])
+	// }
 	return l.dCdA
 }
 
 func (l *layer) activations() *mat.F32Matrix {
-	if l.isOutput {
+	if l.isOutput && l.classification {
 		// Override the Activations() receiver of the embedded layer so that we can
 		// apply the softmax activation when reading the output activations.
 		for i := range l.logits.NumRows() {
@@ -164,6 +173,11 @@ func (l *layer) activations() *mat.F32Matrix {
 			}
 		}
 	}
+
+	// if l.Type() == Output {
+	// slog.Info("acts", "acts", l.acts.Data()[:4])
+	// slog.Info("weights", "weights", l.weights.Data()[:10])
+	// }
 
 	return l.acts
 }
@@ -191,6 +205,14 @@ func (l *layer) Forward() error {
 	// previous layer's neuron is indexed by column.
 
 	// z = actFn(dot(A,W) + b)
+
+	// Imagine we want to pipeline the execution of our layers, with each
+	// layer executing on a different goroutine.
+	//
+	// We can only run the forward pass once the result from any prior
+	// Forward() calls has been fully read. So we need to reader to set
+	// a flag 'consumed' on the layer. If 'consumed', we can run the
+	// next batch
 
 	if err := l.logits.Mul(l.prev.activations(), l.weights); err != nil {
 		return fmt.Errorf("failed multiplying activations and weights: %w", err)
@@ -241,11 +263,18 @@ func (l *layer) Backward() error {
 	return nil
 }
 
-func (l *layer) update(lr, lambda float64) {
+func (l *layer) update(lr, lambda, beta float64) {
 	// Regularize and update
 	for i := range l.weights.NumRows() {
 		for j, w := range l.weights.Row(i) {
-			l.weights.Row(i)[j] -= float32(lr) * (l.dCdW.Row(i)[j] + (float32(lambda) * w))
+			// To support SGD with momentum we need to calculate the velocity
+			// term and use it in place of the weight gradient. When beta is
+			// 0 then the velocity term is simply the most recent weight grad.
+			//
+			// // vt = β * vt_prev + (1 - β) * dCdW
+			l.velocities[i][j] = l.velocities[i][j]*float32(beta) + (1-float32(beta))*l.dCdW.Row(i)[j]
+
+			l.weights.Row(i)[j] -= float32(lr) * (l.velocities[i][j] + (float32(lambda) * w))
 		}
 	}
 
@@ -281,19 +310,21 @@ func (l *layer) Type() LayerType {
 	return Hidden
 }
 
-func initWeights(act ActivationFunc, prevWidth, width int) (*mat.F32Matrix, *mat.F32Matrix) {
+func initWeights(act ActivationFunc, prevWidth, width int) (*mat.F32Matrix, *mat.F32Matrix, [][]float32) {
 	var (
-		weights = mat.New(prevWidth, width)
-		dCdW    = mat.New(prevWidth, width)
+		weights    = mat.New(prevWidth, width)
+		dCdW       = mat.New(prevWidth, width)
+		velocities = make([][]float32, prevWidth)
 	)
 
 	for i := range int(prevWidth) {
+		velocities[i] = make([]float32, width)
 		for j := range width {
 			switch act.(type) {
 			case Sigmoid:
 				// Xavier Normal initialization: W ~ N(0, sqrt(2/n_in + n_out))
 				weights.Row(i)[j] = float32(rand.NormFloat64() * math.Sqrt(float64(2)/float64(prevWidth+width)))
-			case ReLU:
+			case ReLU, LeakyReLU:
 				// Kaiming He intialization: W ~ N(0, sqrt(2/n_inputs))
 
 				// Here we modify the n_inputs term to be max(n_inputs, 10), this is to
@@ -307,7 +338,7 @@ func initWeights(act ActivationFunc, prevWidth, width int) (*mat.F32Matrix, *mat
 		}
 	}
 
-	return weights, dCdW
+	return weights, dCdW, velocities
 }
 
 func initBiases(width int) ([]float32, []float32) {
@@ -339,7 +370,8 @@ func (m *MLP) getActivationFunc(lType LayerType) ActivationFunc {
 	case Hidden:
 		fallthrough
 	default:
-		return ReLU{}
+		// return ReLU{}
+		return LeakyReLU{}
 	}
 }
 

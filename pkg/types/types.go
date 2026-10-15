@@ -60,7 +60,7 @@ func (d *F32Data) Len() int {
 func (d *F32Data) Bytes() []byte {
 	var out = make([]byte, len(d.Data)*4)
 	for i, elem := range d.Data {
-		binary.LittleEndian.PutUint32(out[i:i+4], math.Float32bits(elem))
+		binary.LittleEndian.PutUint32(out[i*4:i*4+4], math.Float32bits(elem))
 	}
 	return out
 }
@@ -80,7 +80,7 @@ func (d *F16Data) Len() int {
 func (d *F16Data) Bytes() []byte {
 	var out = make([]byte, len(d.Data)*2)
 	for i, elem := range d.Data {
-		binary.LittleEndian.PutUint16(out[i:i+2], uint16(elem))
+		binary.LittleEndian.PutUint16(out[i*2:i*2+2], uint16(elem))
 	}
 	return out
 }

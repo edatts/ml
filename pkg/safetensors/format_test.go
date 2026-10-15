@@ -14,8 +14,9 @@ import (
 var (
 	parameters = []types.Tensor{
 		{
-			Name:  "layers.conv2d_1.weights",
-			Shape: shape.New(2, 1, 3, 3),
+			Name:     "layers.conv2d_1.weights",
+			Shape:    shape.New(2, 1, 3, 3),
+			DataType: types.F32,
 			Data: &types.F32Data{
 				Data: []float32{
 					0, 1, 2, 3, 4, 5, 6, 7, 8,
@@ -24,15 +25,17 @@ var (
 			},
 		},
 		{
-			Name:  "layers.conv2d_1.biases",
-			Shape: shape.New(2),
+			Name:     "layers.conv2d_1.biases",
+			Shape:    shape.New(2),
+			DataType: types.F32,
 			Data: &types.F32Data{
 				Data: []float32{3, 5},
 			},
 		},
 		{
-			Name:  "layers.full_1.weights",
-			Shape: shape.New(4, 4),
+			Name:     "layers.full_1.weights",
+			Shape:    shape.New(4, 4),
+			DataType: types.F32,
 			Data: &types.F32Data{
 				Data: []float32{
 					1, 1, 1, 1, 1, 1, 1, 1,
@@ -41,8 +44,9 @@ var (
 			},
 		},
 		{
-			Name:  "layers.full_1.biases",
-			Shape: shape.New(4),
+			Name:     "layers.full_1.biases",
+			Shape:    shape.New(4),
+			DataType: types.F32,
 			Data: &types.F32Data{
 				Data: []float32{3, 3, 3, 3},
 			},
