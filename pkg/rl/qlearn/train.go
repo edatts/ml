@@ -8,26 +8,39 @@ import (
 )
 
 type State interface {
+	Data() []float32
 	Encode() []byte
-	Decode([]byte) (State, error)
+	Decode([]byte) error
+	String() string
+	FromString(string) error
+	IsTerminalAction(int) bool
 }
 
-type ComparableState interface {
-	State
-	comparable
-}
-
-type Env[T ComparableState] interface {
+type Env interface {
 	Init()
-	Step(action int) (float64, bool)
-	State() T
+	Step(action int) (float64, float64, bool)
+	State() State
 	Reset()
+	Test(agent Agent) error
+}
+
+type Params struct {
+	ActN         uint16
+	StateSize    uint16
+	LearningRate float64
+	LrDecay      float64
+	MinLr        float64
+	Gamma        float64
+	Epsilon      float64
+	EpsilonDecay float64
+	MinEpsilon   float64
 }
 
 type opts struct {
 	numEpisodes     int
 	maxEpisodeSteps int
 	saveAgent       bool
+	modelType       string
 }
 
 type Option func(*opts)
@@ -50,7 +63,13 @@ func WithSaveAgent(saveAgent bool) Option {
 	}
 }
 
-func Train[T ComparableState](agent *agent[T], env Env[T], optFns ...Option) error {
+func WithModelType(mType string) Option {
+	return func(o *opts) {
+		o.modelType = mType
+	}
+}
+
+func Train(agent Agent, env Env, optFns ...Option) error {
 	opts := opts{
 		numEpisodes:     100000,
 		maxEpisodeSteps: 10000,
@@ -64,9 +83,9 @@ func Train[T ComparableState](agent *agent[T], env Env[T], optFns ...Option) err
 		numSteps     int
 		numEpisodes  int
 		totalRewards float64
-		bestScore    int
-		avgScore100  int
-		recentScores []int
+		bestScore    float64
+		avgScore100  float64
+		recentScores []float64
 	)
 
 	env.Init()
@@ -75,23 +94,25 @@ func Train[T ComparableState](agent *agent[T], env Env[T], optFns ...Option) err
 		numSteps = 0
 
 		var done bool
-		var episodeScore int
+		var episodeScore float64
 		for !done {
 			numSteps++
 
 			var (
 				reward float64
 				state  = env.State()
-				action = agent.NextAction(state)
 			)
 
-			reward, done = env.Step(action)
+			action, err := agent.NextAction(state)
+			if err != nil {
+				return err
+			}
+
+			reward, episodeScore, done = env.Step(action)
 			totalRewards += reward
 
-			agent.UpdateQTable(state, action, reward, env.State())
-
-			if reward >= 1 {
-				episodeScore++
+			if err := agent.UpdateQValues(state, action, reward, env.State(), done); err != nil {
+				return err
 			}
 
 			// if numSteps%5000 == 0 {
@@ -113,21 +134,29 @@ func Train[T ComparableState](agent *agent[T], env Env[T], optFns ...Option) err
 			recentScores = recentScores[1:]
 		}
 
-		var sum int
+		var sum float64
 		for _, elem := range recentScores {
 			sum += elem
 		}
 		avgScore100 = sum / 100
 
-		if numEpisodes%500 == 0 {
-			slog.Info("episode complete", "episode", numEpisodes, "score", episodeScore, "avgScore", avgScore100, "stepsTaken", numSteps, "totalRewards", totalRewards, "epsilon", agent.epsilon, "lr", agent.learningRate)
+		if numEpisodes%50 == 0 {
+			slog.Info("episode complete", "episode", numEpisodes, "score", episodeScore, "avgScore", avgScore100, "stepsTaken", numSteps, "totalRewards", totalRewards, "epsilon", agent.Epsilon(), "lr", agent.LearningRate())
 		}
 	}
 
-	slog.Info("training complete", "bestScore", bestScore, "avgScore", avgScore100, "finalEpsilon", agent.epsilon)
+	slog.Info("training complete", "bestScore", bestScore, "avgScore", avgScore100, "finalEpsilon", agent.Epsilon())
+
+	// At the end of training we should probably run some test simulations
+	// with epsilon set to 0 so we can estimate the actual performance of
+	// the agent.
+
+	if err := env.Test(agent); err != nil {
+		return err
+	}
 
 	if opts.saveAgent {
-		fileName := fmt.Sprintf("qlearn_snake_%d", time.Now().Unix())
+		fileName := fmt.Sprintf("qlearn_%s_snake_%d", opts.modelType, time.Now().Unix())
 		f, err := os.Create(fileName)
 		if err != nil {
 			return fmt.Errorf("failed creating agent file: %w", err)

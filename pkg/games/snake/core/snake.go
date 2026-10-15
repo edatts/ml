@@ -5,14 +5,14 @@ import (
 	"math/rand/v2"
 )
 
-const height, width = 30, 30
+const Height, Width = 30, 30
 
 func New() *Core {
 	return &Core{
 		tiles: Tiles{
-			height: height,
-			width:  width,
-			data:   make([]Tile, height*width),
+			height: Height,
+			width:  Width,
+			data:   make([]Tile, Height*Width),
 		},
 	}
 }
@@ -71,7 +71,7 @@ func (c *Core) Reset() {
 // component to translate user input into directions and is also
 // used to input actions from agents when they are playing.
 func (c *Core) SetDirection(d Direction) {
-	if d != "" && !isOpposite(c.currentDirection, d) {
+	if d != "" && !IsOpposite(c.currentDirection, d) {
 		c.currentDirection = d
 	}
 }
@@ -187,7 +187,7 @@ func (c *Core) hitFood(newIdx int) bool {
 	return c.tiles.data[newIdx] == 1
 }
 
-func isOpposite(d1, d2 Direction) bool {
+func IsOpposite(d1, d2 Direction) bool {
 	switch d1 {
 	case Up:
 		return d2 == Down

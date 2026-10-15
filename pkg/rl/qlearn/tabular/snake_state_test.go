@@ -1,10 +1,10 @@
-package qlearn_test
+package tabular_test
 
 import (
 	"encoding/json"
 	"testing"
 
-	"github.com/edatts/ml/pkg/rl/qlearn"
+	qlearn "github.com/edatts/ml/pkg/rl/qlearn/tabular"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,9 +17,8 @@ func TestSnakeStateEncDec(t *testing.T) {
 	require.Equal(t, encoded, raw.Encode())
 
 	var s qlearn.SnakeState
-	decoded, err := s.Decode(encoded)
-	require.NoError(t, err)
-	require.Equal(t, raw, decoded)
+	require.NoError(t, s.Decode(encoded))
+	require.Equal(t, raw, s)
 
 }
 
@@ -44,13 +43,12 @@ func BenchmarkSnakeStateEncDec(b *testing.B) {
 		// Validate the outputs before benching
 		var s qlearn.SnakeState
 		encoded := raw.Encode()
-		decoded, err := s.Decode(encoded)
-		require.NoError(b, err)
-		require.Equal(b, raw, decoded)
+		require.NoError(b, s.Decode(encoded))
+		require.Equal(b, raw, s)
 
 		for b.Loop() {
 			encoded := raw.Encode()
-			_, _ = s.Decode(encoded)
+			_ = s.Decode(encoded)
 		}
 	})
 }

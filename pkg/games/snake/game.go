@@ -66,7 +66,8 @@ type Game struct {
 	core        *core.Core
 	speed       Speed
 	inputBuffer []ebiten.Key
-	agent       qlearn.Agent[qlearn.SnakeState]
+	agent       qlearn.Agent
+	stateFn     qlearn.SnakeStateFn
 
 	gameOver bool
 }
@@ -128,12 +129,14 @@ func (g *Game) Update() error {
 			g.inputBuffer = g.inputBuffer[1:]
 		}
 
-		// TODO: We need to differentiate between agents from different
-		// algorithms so we can build their state accordingly.
 		if g.agent != nil {
 			// Build the agent state from core
-			state := qlearn.NewSnakeState(g.core.State())
-			action := g.agent.NextAction(state)
+			state := g.stateFn(g.core.State())
+			action, err := g.agent.NextAction(state)
+			if err != nil {
+				return err
+			}
+
 			d = qlearn.SnakeActions[action]
 		}
 
@@ -180,11 +183,13 @@ func (g *Game) Layout(_, _ int) (width int, height int) {
 func (g *Game) actionInterval() int64 {
 	switch g.speed {
 	case Slow:
-		return 15
+		return 8
 	case Medium:
-		return 10
+		return 6
 	case Fast:
-		return 5
+		return 4
+	case VeryFast:
+		return 2
 	case Unreal:
 		return 1
 	default:

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"slices"
 )
 
@@ -30,10 +31,32 @@ type node struct {
 	prev  *node
 }
 
+func NewTiles(height, width int, data []Tile) (Tiles, error) {
+	if len(data) != height*width {
+		return Tiles{}, fmt.Errorf("data is incompatible with height and width")
+	}
+
+	return Tiles{
+		data:   data,
+		height: height,
+		width:  width,
+	}, nil
+}
+
 type Tiles struct {
 	data          []Tile
 	height, width int
 }
+
+// func (t Tiles) ScaledData() []float32 {
+// 	// We want to scale the data between 0 and 1 and since the
+// 	// data is alread in range 0-3 we can just divide by 3.
+// 	var out = make([]float32, len(t.data))
+// 	for i, datum := range t.data {
+// 		out[i] = float32(datum) / 3
+// 	}
+// 	return out
+// }
 
 func (t Tiles) X(idx int) int {
 	return idx % t.width
